@@ -97,9 +97,13 @@
 ### `docker-compose.yml`
 
 ```yaml
+version: "3.8"
+
 services:
   cloudimgs:
-    image: qazzxxx/cloudimgs:latest
+    # 使用您自己的 Docker Hub 镜像
+    # 如果 fork 了项目，请将 YOUR_DOCKERHUB_USERNAME 替换为您的 Docker Hub 用户名
+    image: wuyuekiki/cloudimgs:latest
     container_name: cloudimgs-app
     restart: unless-stopped
     ports:
@@ -120,6 +124,9 @@ services:
       # 可选配置
       # - MAX_FILE_SIZE=104857600 # 最大文件大小，默认 100MB
       # - THUMBNAIL_WIDTH=0 # 瀑布流缩略图宽度（像素），默认 0 表示使用原图
+      # - UPLOAD_TIMEOUT=120000 # 单个文件上传超时时间（毫秒），默认 120 秒
+      # - DUPLICATE_STRATEGY=timestamp # 文件名冲突策略: timestamp | counter | overwrite
+      # - USE_TRASH=true # 是否使用回收站（true=移动到.trash目录，false=真实删除）
       # - PASSWORD=your_secure_password_here # 🔐 密码保护配置
       # - ENABLE_MAGIC_SEARCH=true # ✨ 开启魔法搜索（使用本地CLIP小模型，占用内存较高）
 ```
@@ -132,10 +139,16 @@ services:
 | `ENABLE_MAGIC_SEARCH`| 是否开启 AI 魔法搜索 | `true` / `false` |
 | `MAX_FILE_SIZE` | 最大上传文件限制 (Byte) | `104857600` (100MB) |
 | `THUMBNAIL_WIDTH` | 列表缩略图宽度 (px) | `0` (原图) / `500` |
+| `UPLOAD_TIMEOUT` | 单个文件上传超时时间 (ms) | `120000` (120秒) |
+| `DUPLICATE_STRATEGY` | 文件名冲突策略 | `timestamp` / `counter` / `overwrite` |
+| `USE_TRASH` | 删除时使用回收站 | `true` / `false` |
 
 > **注意**：
 > 1. 设置 `PASSWORD` 后，系统会自动启用登录保护。
 > 2. 登录状态会保存在浏览器本地存储中。
+> 3. 新增的上传和删除配置可在前端设置页面⚙️中调整，优先级高于环境变量。
+> 4. `DUPLICATE_STRATEGY` 控制重名文件处理：`timestamp`（时间戳+计数器）、`counter`（仅计数器）、`overwrite`（直接覆盖）。
+> 5. `USE_TRASH=false` 会永久删除文件，请谨慎使用。
 
 ---
 
