@@ -112,24 +112,24 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
               { required: true, message: "请输入超时时间" },
               {
                 type: "number",
-                min: 10,
-                max: 600,
-                message: "超时时间必须在 10-600 秒之间",
+                min: 0,
+                max: 3600,
+                message: "超时时间必须在 0-3600 秒之间 (设为0表示无限制)",
               },
             ]}
           >
             <InputNumber
-              min={10}
-              max={600}
+              min={0}
+              max={3600}
               step={10}
               addonAfter="秒"
               style={{ width: "100%" }}
-              placeholder="120"
+              placeholder="120 (0表示无限制)"
             />
           </Form.Item>
 
           <Text type="secondary" style={{ fontSize: 12 }}>
-            说明：上传多张图片时，每张图片都有独立的超时计时。建议根据网络速度和文件大小调整此值。
+            说明：设为 0 表示不限制上传时间。上传多张图片时，每张图片都有独立的超时计时。建议根据网络速度和文件大小调整此值。
           </Text>
 
           <Divider orientation="left">
