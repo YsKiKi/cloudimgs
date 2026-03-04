@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   cloudimgs:
-    image: wuyuekiki/cloudimgs:latest
+    image: wuyuekiki/cloudimgs:main-amd64
     ports:
       - "3001:3001"
     volumes:

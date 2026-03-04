@@ -101,7 +101,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
   };
 
   // 上传文件的通用方法
-  const uploadFile = React.useCallback(async (file, onProgress) => {
+  const uploadFile = React.useCallback(async (file, onProgress, fileTimeout) => {
     let safeDir = sanitizeDir(dir);
     if (safeDir.includes("..")) {
       throw new Error("目录不能包含 .. 等非法字符");
@@ -121,18 +121,25 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       : `/upload?duplicateStrategy=${duplicateStrategy}`;
 
     try {
-      const response = await api.post(url, formData, {
+      // 配置axios请求选项
+      const axiosConfig = {
         headers: {
           "Content-Type": "multipart/form-data",
         },
-        timeout: config.timeout, // 为每个文件单独设置超时时间
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round(
             (progressEvent.loaded * 100) / progressEvent.total
           );
           if (onProgress) onProgress(percentCompleted);
         },
-      });
+      };
+      
+      // 如果超时时间不为0，则设置超时；为0时表示无超时限制
+      if (fileTimeout !== 0) {
+        axiosConfig.timeout = fileTimeout;
+      }
+      
+      const response = await api.post(url, formData, axiosConfig);
 
       if (response.data.success) {
         const fileData = response.data.data;
@@ -183,11 +190,14 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     // 添加到队列
     setUploadQueue(prev => [...prev, { uid: renamedFile.uid, name: fileName, progress: 0, status: 'pending' }]);
 
+    // 获取当前的超时设置（为该文件捕获独立的超时时间）
+    const currentTimeout = config.timeout;
+
     // 上传文件
     try {
       await uploadFile(renamedFile, (progress) => {
         updateQueueItem(renamedFile.uid, { progress, status: 'uploading' });
-      });
+      }, currentTimeout);
       updateQueueItem(renamedFile.uid, { progress: 100, status: 'success' });
     } catch (error) {
       updateQueueItem(renamedFile.uid, { status: 'error', errorMsg: error.message });
@@ -268,10 +278,13 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       const uid = file.uid;
       setUploadQueue(prev => [...prev, { uid, name: file.name, progress: 0, status: 'pending' }]);
 
+      // 获取当前的超时设置（为该文件捕获独立的超时时间）
+      const currentTimeout = config.timeout;
+
       try {
         await uploadFile(file, (progress) => {
           updateQueueItem(uid, { progress, status: 'uploading' });
-        });
+        }, currentTimeout);
         updateQueueItem(uid, { progress: 100, status: 'success' });
         onSuccess();
       } catch (error) {
