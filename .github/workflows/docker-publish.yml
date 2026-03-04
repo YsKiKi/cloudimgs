@@ -70,6 +70,8 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
             echo "tags=${IMAGE_NAME}:${VERSION}-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            echo "tags=${IMAGE_NAME}:main-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
             BRANCH=${GITHUB_REF#refs/heads/}
             echo "tags=${IMAGE_NAME}:${BRANCH}-${{ matrix.arch }}" >> $GITHUB_OUTPUT
@@ -165,6 +167,19 @@ jobs:
             fi
             
             # Create latest tag manifest
+            LATEST_IMAGES=($(build_image_list "latest"))
+            if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
+              echo "✅ Created manifest for latest with: ${AVAILABLE_ARCHS[*]}"
+            fi
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            # main branch: create both main and latest manifests
+            MAIN_IMAGES=($(build_image_list "main"))
+            if [ ${#MAIN_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:main "${MAIN_IMAGES[@]}"
+              echo "✅ Created manifest for main with: ${AVAILABLE_ARCHS[*]}"
+            fi
+            
             LATEST_IMAGES=($(build_image_list "latest"))
             if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
               docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
