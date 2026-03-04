@@ -9,10 +9,32 @@ const STORAGE_PATH = config.storage.path;
 
 // WebP 预览图配置
 const PREVIEW_CONFIG = {
-    quality: 80,        // WebP 质量 (0-100)
-    maxWidth: 2048,     // 最大宽度
-    maxHeight: 2048,    // 最大高度
+    quality: 80,        // 初始 WebP 质量 (0-100)
+    targetSize: 2 * 1024 * 1024, // 目标文件大小限制，这里设为 2MB
 };
+
+/**
+ * 递归降低质量尝试生成小于目标大小的 WebP
+ */
+async function compressToTargetSize(originalPath, previewPath, quality) {
+    try {
+        await sharp(originalPath)
+            .rotate() // 自动根据EXIF旋转
+            .webp({ quality })
+            .toFile(previewPath);
+            
+        const stat = await fs.stat(previewPath);
+        
+        // 如果文件仍然大于目标大小，且质量还有下降空间，则继续压缩
+        if (stat.size > PREVIEW_CONFIG.targetSize && quality > 10) {
+            // 每次降低 15 的质量
+            await compressToTargetSize(originalPath, previewPath, quality - 15);
+        }
+        return true;
+    } catch (err) {
+        throw err;
+    }
+}
 
 /**
  * 生成图片的 WebP 预览图
@@ -53,15 +75,8 @@ async function generatePreview(originalPath, relPath) {
             }
         }
 
-        // 生成 WebP 预览图
-        await sharp(originalPath)
-            .rotate() // 自动根据EXIF旋转
-            .resize(PREVIEW_CONFIG.maxWidth, PREVIEW_CONFIG.maxHeight, {
-                fit: 'inside',
-                withoutEnlargement: true
-            })
-            .webp({ quality: PREVIEW_CONFIG.quality })
-            .toFile(previewPath);
+        // 去除固定分辨率限制，改为按文件大小限制压缩
+        await compressToTargetSize(originalPath, previewPath, PREVIEW_CONFIG.quality);
 
         console.log(`Preview generated: ${relPath} -> ${previewFilename}`);
         return previewPath;
