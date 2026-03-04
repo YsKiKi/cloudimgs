@@ -33,8 +33,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
@@ -44,63 +54,141 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Generate image names
-        id: image_names
+      - name: Generate image names and tags
+        id: meta
         run: |
-          echo "dockerhub_image=${{ secrets.DOCKER_USERNAME }}/cloudimgs" >> $GITHUB_OUTPUT
+          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/cloudimgs"
+          echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          
+          # Generate tags based on event type
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "tags=${IMAGE_NAME}:${VERSION}-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH=${GITHUB_REF#refs/heads/}
+            echo "tags=${IMAGE_NAME}:${BRANCH}-${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=${IMAGE_NAME}:${{ github.sha }}-${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          fi
+          
           echo "Debug info:"
-          echo "- Event: ${{ github.event_name }}"
-          echo "- Ref: ${{ github.ref }}"
-          echo "- Tag: ${{ github.ref_name }}"
-          echo "- SHA: ${{ github.sha }}"
+          echo "- Platform: ${{ matrix.platform }}"
+          echo "- Arch: ${{ matrix.arch }}"
+          echo "- Runner: ${{ matrix.runner }}"
 
-      - name: Extract metadata for Docker Hub
-        id: meta-dockerhub
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.image_names.outputs.dockerhub_image }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-
-      - name: Build and push to Docker Hub
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.gha
           push: true
-          tags: ${{ steps.meta-dockerhub.outputs.tags }}
-          platforms: ${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           build-args: |
             NODE_OPTIONS=--max-old-space-size=4096
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
 
-      - name: Move cache
+      - name: Build success notification
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          echo "✅ ${{ matrix.platform }} image built and pushed successfully!"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+
+  manifest:
+    needs: build
+    if: success() || failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/cloudimgs"
+          
+          # Check which architectures are available
+          AVAILABLE_ARCHS=()
+          if docker manifest inspect ${IMAGE_NAME}:main-amd64 >/dev/null 2>&1 || \
+             docker manifest inspect ${IMAGE_NAME}:latest-amd64 >/dev/null 2>&1 || \
+             docker buildx imagetools inspect ${IMAGE_NAME}:main-amd64 >/dev/null 2>&1; then
+            AVAILABLE_ARCHS+=("amd64")
+            echo "✅ amd64 image found"
+          else
+            echo "⚠️  amd64 image not found"
+          fi
+          
+          if docker manifest inspect ${IMAGE_NAME}:main-arm64 >/dev/null 2>&1 || \
+             docker manifest inspect ${IMAGE_NAME}:latest-arm64 >/dev/null 2>&1 || \
+             docker buildx imagetools inspect ${IMAGE_NAME}:main-arm64 >/dev/null 2>&1; then
+            AVAILABLE_ARCHS+=("arm64")
+            echo "✅ arm64 image found"
+          else
+            echo "⚠️  arm64 image not found"
+          fi
+          
+          # Exit if no images available
+          if [ ${#AVAILABLE_ARCHS[@]} -eq 0 ]; then
+            echo "❌ No architecture images found, skipping manifest creation"
+            exit 1
+          fi
+          
+          # Build image list based on available architectures
+          build_image_list() {
+            local base_tag=$1
+            local images=()
+            for arch in "${AVAILABLE_ARCHS[@]}"; do
+              images+=("${IMAGE_NAME}:${base_tag}-${arch}")
+            done
+            echo "${images[@]}"
+          }
+          
+          # Generate manifest tags based on event type
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            
+            # Create version tag manifest
+            VERSION_IMAGES=($(build_image_list "${VERSION}"))
+            if [ ${#VERSION_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:${VERSION} "${VERSION_IMAGES[@]}"
+              echo "✅ Created manifest for ${VERSION} with: ${AVAILABLE_ARCHS[*]}"
+            fi
+            
+            # Create latest tag manifest
+            LATEST_IMAGES=($(build_image_list "latest"))
+            if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
+              echo "✅ Created manifest for latest with: ${AVAILABLE_ARCHS[*]}"
+            fi
+          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH=${GITHUB_REF#refs/heads/}
+            
+            # Create branch tag manifest
+            BRANCH_IMAGES=($(build_image_list "${BRANCH}"))
+            if [ ${#BRANCH_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:${BRANCH} "${BRANCH_IMAGES[@]}"
+              echo "✅ Created manifest for ${BRANCH} with: ${AVAILABLE_ARCHS[*]}"
+            fi
+          else
+            # Create SHA tag manifest
+            SHA_IMAGES=($(build_image_list "${{ github.sha }}"))
+            if [ ${#SHA_IMAGES[@]} -gt 0 ]; then
+              docker buildx imagetools create -t ${IMAGE_NAME}:${{ github.sha }} "${SHA_IMAGES[@]}"
+              echo "✅ Created manifest for ${{ github.sha }} with: ${AVAILABLE_ARCHS[*]}"
+            fi
+          fi
 
       - name: Success notification
         run: |
-          echo "✅ Docker image published successfully to Docker Hub!"
-          echo "Image: ${{ steps.image_names.outputs.dockerhub_image }}"
-          echo "Tags: ${{ steps.meta-dockerhub.outputs.tags }}"
-          echo "Debug - Tags:"
-          echo "${{ steps.meta-dockerhub.outputs.tags }}" | tr ',' '\n' | sed 's/^/  /'
+          echo "✅ Docker multi-arch images published successfully to Docker Hub!"
+          echo "Image: ${{ secrets.DOCKER_USERNAME }}/cloudimgs"
