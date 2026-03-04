@@ -172,22 +172,30 @@ const ApiDocs = () => {
           key="1"
           extra={<FileImageOutlined />}
         >
-          <Card type="inner" title="📖 重要说明：预览图 vs 原图" bordered={false} style={{ background: token.colorInfoBg, marginBottom: 16 }}>
+          <Card type="inner" title="📖 接口说明：预览图 / 原图 / 兼容路由" bordered={false} style={{ background: token.colorInfoBg, marginBottom: 16 }}>
             <Paragraph>
-              <Text strong>为了优化性能和节省带宽，系统提供了两种访问图片的端点：</Text>
+              <Text strong>系统为每种访问场景提供独立接口，以优化性能和带宽：</Text>
             </Paragraph>
             <ul>
               <li>
-                <Text code>/api/images/:path</Text> - <Tag color="green">推荐用于网页显示</Tag>
-                <br />返回 <Text strong>WebP 压缩预览图</Text>（最大 2048x2048，质量 80%），文件大小通常减少 60-80%，加载更快
+                <Text code>/api/images/preview/:path</Text> - <Tag color="green">预览图（推荐展示用）</Tag>
+                <br />始终返回 <Text strong>WebP 压缩预览图</Text>（最大 2048×2048，质量 80%），大小缩减 60–80%，加载更快；无缓存时同步生成
               </li>
               <li>
-                <Text code>/api/files/:path</Text> - <Tag color="blue">用于下载原图</Tag>
-                <br />返回 <Text strong>原始图片</Text>（无任何处理），保持完整质量
+                <Text code>/api/images/raw/:path</Text> - <Tag color="blue">原图（下载/编辑/备份）</Tag>
+                <br />始终返回 <Text strong>原始图片</Text>（无附加参数）或按参数实时处理后的图片（有 w/h/q/fmt 等参数）
+              </li>
+              <li>
+                <Text code>/api/images/:path</Text> - <Tag color="default">兼容路由</Tag>
+                <br />向后兼容：<Text strong>无处理参数</Text>时等同于 preview，<Text strong>有处理参数</Text>时等同于 raw
+              </li>
+              <li>
+                <Text code>/api/files/:path</Text> - <Tag color="volcano">文件直出（无处理）</Tag>
+                <br />直接发送原始文件，不记录统计；适合直链下载
               </li>
             </ul>
             <Paragraph type="secondary" style={{ marginTop: 12 }}>
-              💡 提示：预览图在首次访问时自动生成并缓存在 <Text code>.preview</Text> 目录中
+              💡 提示：预览图自动生成并缓存于 <Text code>.preview</Text> 子目录；API 响应中的 <Text code>previewUrl</Text> / <Text code>rawUrl</Text> 字段已包含对应直链
             </Paragraph>
           </Card>
 
@@ -215,52 +223,76 @@ const ApiDocs = () => {
 
           <Divider />
 
-          <Card type="inner" title="访问图片（预览图优化）" bordered={false}>
+          <Card type="inner" title="获取指定图片 — 预览图" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="green" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/images/preview/:path</Text>
+              <CurlButton endpoint="/api/images/preview/photos/sunset.jpg" method="GET" />
+            </div>
+            <Paragraph>
+              始终返回 <Text strong>WebP 优化预览图</Text>。无缓存时同步生成后返回；适合网页展示、缩略图等场景。
+            </Paragraph>
+            <Divider orientation="left" plain>特点</Divider>
+            <ul>
+              <li>✅ 始终返回 WebP 格式（质量 80%，自动压缩）</li>
+              <li>✅ 无预览缓存时同步生成（不再是异步，首次稍慢）</li>
+              <li>✅ 支持 <Text code>format=json</Text> 参数返回元数据 JSON</li>
+              <li>✅ 长缓存（1 年）</li>
+            </ul>
+          </Card>
+
+          <Divider />
+
+          <Card type="inner" title="获取指定图片 — 原图" bordered={false}>
             <div style={endpointStyle}>
               <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/images/raw/:path</Text>
+              <CurlButton endpoint="/api/images/raw/photos/sunset.jpg" method="GET" />
+            </div>
+            <Paragraph>
+              <Text strong>无参数</Text>时直接发送原始文件（原格式、原分辨率）；<Text strong>有处理参数</Text>时使用 Sharp 实时处理后返回。
+            </Paragraph>
+            <Divider orientation="left" plain>URL 处理参数（可选）</Divider>
+            <ul>
+              <li><Text code>w</Text>: 目标宽度（像素）</li>
+              <li><Text code>h</Text>: 目标高度（像素）</li>
+              <li><Text code>q</Text>: 图片质量，1–100（默认 80）</li>
+              <li><Text code>fmt</Text>: 输出格式，支持 <Text code>webp</Text>、<Text code>jpeg</Text>、<Text code>png</Text>、<Text code>avif</Text></li>
+              <li><Text code>rows</Text>、<Text code>cols</Text>、<Text code>idx</Text>: 网格切分参数</li>
+            </ul>
+            <Divider orientation="left" plain>示例</Divider>
+            <ul>
+              <li><Text code>/api/images/raw/photo.jpg</Text> — 直接返回原始文件</li>
+              <li><Text code>/api/images/raw/photo.jpg?w=800&fmt=webp</Text> — 返回 800px WebP</li>
+              <li><Text code>/api/images/raw/photo.jpg?rows=3&cols=3&idx=0</Text> — 返回网格切分第 0 块</li>
+            </ul>
+          </Card>
+
+          <Divider />
+
+          <Card type="inner" title="获取指定图片 — 兼容路由" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="default" style={methodTagStyle('GET')}>GET</Tag>
               <Text code copyable>/api/images/:path</Text>
               <CurlButton endpoint="/api/images/photos/sunset.jpg" method="GET" />
             </div>
             <Paragraph>
-              访问图片，自动返回 WebP 优化预览图（如果存在）。适合网页展示、API 调用等场景。
-            </Paragraph>
-            <Divider orientation="left" plain>URL 参数（可选，使用原图进行处理）</Divider>
-            <ul>
-              <li><Text code>w</Text>: 目标宽度（像素）</li>
-              <li><Text code>h</Text>: 目标高度（像素）</li>
-              <li><Text code>q</Text>: 图片质量，1-100（默认 80）</li>
-              <li><Text code>fmt</Text>: 输出格式，支持 <Text code>webp</Text>, <Text code>jpeg</Text>, <Text code>png</Text>, <Text code>avif</Text></li>
-              <li><Text code>rows</Text>, <Text code>cols</Text>, <Text code>idx</Text>: 网格切分参数</li>
-            </ul>
-            <Divider orientation="left" plain>示例</Divider>
-            <ul>
-              <li><Text code>/api/images/photo.jpg</Text> - 返回 WebP 预览图（自动优化）</li>
-              <li><Text code>/api/images/photo.jpg?w=500</Text> - 返回宽度 500px 的图片（使用原图处理）</li>
-              <li><Text code>/api/images/photo.jpg?w=800&q=90&fmt=webp</Text> - 返回 800px 宽、90% 质量的 WebP 图片</li>
-            </ul>
-            <Paragraph type="warning" style={{ marginTop: 12 }}>
-              ⚠️ 注意：带任何处理参数时，会使用原图进行实时处理，不使用预览图缓存。
+              向后兼容路由：<Text strong>无处理参数</Text>时等同于 <Text code>/api/images/preview/:path</Text>；
+              <Text strong>有处理参数（w/h/q/fmt 等）</Text>时等同于 <Text code>/api/images/raw/:path</Text>。
             </Paragraph>
           </Card>
 
           <Divider />
 
-          <Card type="inner" title="下载原图" bordered={false}>
+          <Card type="inner" title="文件直出（无任何处理）" bordered={false}>
             <div style={endpointStyle}>
-              <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
+              <Tag color="volcano" style={methodTagStyle('GET')}>GET</Tag>
               <Text code copyable>/api/files/:path</Text>
               <CurlButton endpoint="/api/files/photos/sunset.jpg" method="GET" />
             </div>
             <Paragraph>
-              直接下载原始图片，不进行任何处理或优化。适合需要完整质量的场景（下载、编辑、备份等）。
+              直接发送原始文件，不记录访问统计，不走 Sharp 管道。适合直链场景（下载、备份等）。
             </Paragraph>
-            <Divider orientation="left" plain>特点</Divider>
-            <ul>
-              <li>✅ 原始文件格式（PNG/JPG/GIF 等）</li>
-              <li>✅ 原始分辨率</li>
-              <li>✅ 无损质量</li>
-              <li>✅ 不使用预览图缓存</li>
-            </ul>
           </Card>
 
           <Divider />
@@ -290,30 +322,66 @@ const ApiDocs = () => {
 
           <Divider />
 
-          <Card type="inner" title="获取随机图片" bordered={false}>
+          <Card type="inner" title="获取随机图片 — 预览图" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="green" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/random/preview</Text>
+              <CurlButton endpoint="/api/random/preview" method="GET" />
+            </div>
+            <Paragraph>
+              随机选取一张图片并返回其 <Text strong>WebP 预览图</Text>（同步生成）。
+            </Paragraph>
+            <Divider orientation="left" plain>参数</Divider>
+            <ul>
+              <li><Text code>dir</Text>: 限定目录路径（可选）</li>
+              <li><Text code>format=json</Text>: 返回元数据 JSON（含 <Text code>previewUrl</Text> / <Text code>rawUrl</Text>）</li>
+            </ul>
+            <Divider orientation="left" plain>示例</Divider>
+            <ul>
+              <li><Text code>/api/random/preview</Text> — 随机图片预览图</li>
+              <li><Text code>/api/random/preview?dir=travel</Text> — 限定 travel 目录</li>
+              <li><Text code>/api/random/preview?format=json</Text> — 返回元数据 JSON</li>
+            </ul>
+          </Card>
+
+          <Divider />
+
+          <Card type="inner" title="获取随机图片 — 原图" bordered={false}>
             <div style={endpointStyle}>
               <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/random/raw</Text>
+              <CurlButton endpoint="/api/random/raw" method="GET" />
+            </div>
+            <Paragraph>
+              随机选取一张图片并返回其<Text strong>原始文件</Text>（无参数）或<Text strong>实时处理结果</Text>（有处理参数）。
+            </Paragraph>
+            <Divider orientation="left" plain>参数</Divider>
+            <ul>
+              <li><Text code>dir</Text>: 限定目录路径（可选）</li>
+              <li><Text code>format=json</Text>: 返回元数据 JSON</li>
+              <li><Text code>w</Text>、<Text code>h</Text>: 目标宽/高（像素）</li>
+              <li><Text code>q</Text>: 图片质量，1–100</li>
+              <li><Text code>fmt</Text>: 输出格式，支持 <Text code>webp</Text>、<Text code>avif</Text>、<Text code>jpeg</Text>、<Text code>png</Text></li>
+            </ul>
+            <Divider orientation="left" plain>示例</Divider>
+            <ul>
+              <li><Text code>/api/random/raw</Text> — 随机原图文件</li>
+              <li><Text code>/api/random/raw?w=800&fmt=jpeg</Text> — 随机图片处理为 800px JPEG</li>
+              <li><Text code>/api/random/raw?format=json</Text> — 随机图片元数据 JSON</li>
+            </ul>
+          </Card>
+
+          <Divider />
+
+          <Card type="inner" title="获取随机图片 — 兼容路由" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="default" style={methodTagStyle('GET')}>GET</Tag>
               <Text code copyable>/api/random</Text>
               <CurlButton endpoint="/api/random?format=json" method="GET" />
             </div>
             <Paragraph>
-              随机获取一张图片。默认返回 WebP 预览图，支持实时图像处理参数。
+              向后兼容路由：<Text strong>无处理参数</Text>时等同于 <Text code>/api/random/preview</Text>；<Text strong>有处理参数</Text>时等同于 <Text code>/api/random/raw</Text>。
             </Paragraph>
-            <Divider orientation="left" plain>参数</Divider>
-            <ul>
-              <li><Text code>dir</Text>: 限定目录路径 (可选)</li>
-              <li><Text code>format</Text>: 返回格式，<Text code>json</Text> 返回元数据（包含 <Text code>fullUrl</Text>），否则直接返回图片流</li>
-              <li><Text code>w</Text>: 目标宽度 (可选，会使用原图处理)</li>
-              <li><Text code>h</Text>: 目标高度 (可选，会使用原图处理)</li>
-              <li><Text code>q</Text>: 图片质量，1-100 (可选)</li>
-              <li><Text code>fmt</Text>: 目标格式，支持 <Text code>webp</Text>, <Text code>avif</Text>, <Text code>jpeg</Text>, <Text code>png</Text> (可选)</li>
-            </ul>
-            <Divider orientation="left" plain>示例</Divider>
-            <ul>
-              <li><Text code>/api/random</Text> - 返回随机图片的 WebP 预览图</li>
-              <li><Text code>/api/random?format=json</Text> - 返回随机图片的元数据（JSON）</li>
-              <li><Text code>/api/random?w=800&fmt=jpeg</Text> - 返回 800px 宽的 JPEG 图片</li>
-            </ul>
           </Card>
 
           <Divider />

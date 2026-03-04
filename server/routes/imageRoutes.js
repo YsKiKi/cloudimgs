@@ -277,204 +277,232 @@ router.get('/images/meta/*', requirePassword, async (req, res) => {
     }
 });
 
-// 辅助函数：处理并发送图片
-async function serveImage(req, res, relPath) {
+// ─────────────────────────────────────────────────────────────────────────────
+// 内部辅助：使用 Sharp 处理图片（支持网格切分、缩放、格式转换）
+// 返回 { buffer, mime }
+// ─────────────────────────────────────────────────────────────────────────────
+async function applySharp(filePath, query) {
+    const { w, h, q, fmt, rows, cols, idx } = query;
+    let img = sharp(filePath).rotate();
+
+    // 网格切分
+    if (rows && cols && idx !== undefined) {
+        const r = parseInt(rows), c = parseInt(cols), i = parseInt(idx);
+        if (r > 0 && c > 0 && i >= 0 && i < r * c) {
+            const meta = await img.metadata();
+            const subW = Math.floor(meta.width / c);
+            const subH = Math.floor(meta.height / r);
+            const row = Math.floor(i / c), col = i % c;
+            img.extract({
+                left: col * subW, top: row * subH,
+                width: Math.min(subW, meta.width - col * subW),
+                height: Math.min(subH, meta.height - row * subH)
+            });
+        }
+    }
+
+    // 缩放
+    if (w || h) {
+        img = img.resize({
+            width: w ? parseInt(w) : null,
+            height: h ? parseInt(h) : null,
+            fit: "cover", position: "center", withoutEnlargement: true
+        });
+    }
+
+    // 格式 / 质量
+    let outMime = mime.lookup(filePath) || "application/octet-stream";
+    if (fmt === "webp")       { img = img.webp({ quality: q ?? 80 });  outMime = "image/webp"; }
+    else if (fmt === "jpeg")  { img = img.jpeg({ quality: q ?? 80 }); outMime = "image/jpeg"; }
+    else if (fmt === "png")   { img = img.png();                       outMime = "image/png";  }
+    else if (fmt === "avif")  { img = img.avif({ quality: q ?? 50 }); outMime = "image/avif"; }
+    else if (q) {
+        const orig = (mime.lookup(filePath) || "").toLowerCase();
+        if (orig.includes("jpeg") || orig.includes("jpg")) { img = img.jpeg({ quality: q }); outMime = "image/jpeg"; }
+        else if (orig.includes("webp"))  { img = img.webp({ quality: q });  outMime = "image/webp"; }
+        else if (orig.includes("avif"))  { img = img.avif({ quality: q });  outMime = "image/avif"; }
+        else                             { img = img.png();                  outMime = "image/png";  }
+    }
+
+    const buffer = await img.toBuffer();
+    return { buffer, mime: outMime };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 专职辅助：强制返回 WebP 预览图（无预览时同步生成，生成失败则压缩原图回退）
+// ─────────────────────────────────────────────────────────────────────────────
+async function servePreviewImage(req, res, relPath) {
     try {
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (!await fs.pathExists(filePath)) return res.status(404).json({ error: "Not found" });
 
-        // Thumbhash 触发器
         getThumbHash(filePath).then(h => { if (!h) generateThumbHash(filePath); });
 
-        const { w, h, q, fmt, rows, cols, idx } = req.query;
-
-        // 检查是否有任何处理参数
-        const hasProcessingParams = w || h || q || fmt || rows || cols || idx !== undefined;
-
-        // 如果没有处理参数，尝试使用预览图
-        if (!hasProcessingParams) {
-            const previewPath = await previewService.getPreviewPath(relPath);
-            
-            if (previewPath && await fs.pathExists(previewPath)) {
-                // 使用预览图
-                try {
-                    const stats = await fs.stat(previewPath);
-                    
-                    // 记录统计信息
-                    try {
-                        imageRepository.recordView(stats.size);
-                        imageRepository.incrementViews(relPath);
-                    } catch (e) {
-                        console.error("Stats error", e);
-                    }
-
-                    res.setHeader("Content-Type", "image/webp");
-                    res.setHeader("Cache-Control", "public, max-age=31536000");
-                    return res.sendFile(previewPath);
-                } catch (err) {
-                    console.error("Error serving preview:", err);
-                    // 如果预览图发送失败，回退到处理原图
-                }
-            } else {
-                // 预览图不存在，异步生成（不阻塞当前请求）
-                previewService.generatePreview(filePath, relPath).catch(err => {
-                    console.error('Failed to generate preview on demand:', err);
-                });
-            }
+        // 尝试预览缓存
+        let previewPath = await previewService.getPreviewPath(relPath);
+        if (!previewPath || !await fs.pathExists(previewPath)) {
+            // 同步生成预览图（等待完成后再返回）
+            await previewService.generatePreview(filePath, relPath).catch(err => {
+                console.error('Failed to generate preview:', err);
+            });
+            previewPath = await previewService.getPreviewPath(relPath);
         }
 
-        // Sharp 逻辑（使用原图或有处理参数）
-        try {
-            let img = sharp(filePath).rotate();
-
-            // 2. 处理网格切分 (Slicing)
-            if (rows && cols && idx !== undefined) {
-                const r = parseInt(rows);
-                const c = parseInt(cols);
-                const i = parseInt(idx);
-
-                if (r > 0 && c > 0 && i >= 0 && i < r * c) {
-                    const meta = await img.metadata();
-                    const width = meta.width;
-                    const height = meta.height;
-
-                    const subW = Math.floor(width / c);
-                    const subH = Math.floor(height / r);
-
-                    const row = Math.floor(i / c);
-                    const col = i % c;
-
-                    const left = col * subW;
-                    const top = row * subH;
-
-                    // 防止舍入误差导致溢出
-                    const extractW = Math.min(subW, width - left);
-                    const extractH = Math.min(subH, height - top);
-
-                    img.extract({ left, top, width: extractW, height: extractH });
-
-                }
-            }
-
-            // 3. 处理缩放 (Resize) - 针对切分后的图（或者原图）
-            if (w || h) {
-                img = img.resize({
-                    width: w ? parseInt(w) : null,
-                    height: h ? parseInt(h) : null,
-                    fit: "cover",
-                    position: "center",
-                    withoutEnlargement: true,
-                });
-            }
-
-            let outMime = mime.lookup(filePath) || "application/octet-stream";
-            if (fmt === "webp") {
-                img = img.webp({ quality: q ?? 80 });
-                outMime = "image/webp";
-            } else if (fmt === "jpeg") {
-                img = img.jpeg({ quality: q ?? 80 });
-                outMime = "image/jpeg";
-            } else if (fmt === "png") {
-                img = img.png();
-                outMime = "image/png";
-            } else if (fmt === "avif") {
-                img = img.avif({ quality: q ?? 50 });
-                outMime = "image/avif";
-            } else if (q) {
-                const orig = (mime.lookup(filePath) || "").toLowerCase();
-                if (orig.includes("jpeg") || orig.includes("jpg")) {
-                    img = img.jpeg({ quality: q });
-                    outMime = "image/jpeg";
-                } else if (orig.includes("webp")) {
-                    img = img.webp({ quality: q });
-                    outMime = "image/webp";
-                } else if (orig.includes("avif")) {
-                    img = img.avif({ quality: q });
-                    outMime = "image/avif";
-                } else {
-                    img = img.png();
-                    outMime = "image/png";
-                }
-            }
-
-            const buffer = await img.toBuffer();
-
-            // Record Stats (Fire and forget)
-            try {
-                imageRepository.recordView(buffer.length);
-                imageRepository.incrementViews(relPath);
-            } catch (e) {
-                console.error("Stats error", e);
-            }
-
-            res.setHeader("Content-Type", outMime);
+        if (previewPath && await fs.pathExists(previewPath)) {
+            const stats = await fs.stat(previewPath).catch(() => ({ size: 0 }));
+            try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+            res.setHeader("Content-Type", "image/webp");
             res.setHeader("Cache-Control", "public, max-age=31536000");
-            res.send(buffer);
-        } catch (e) {
-            // 对非图像文件或 sharp 错误的回退
-            if (!w && !h && !q && !fmt) {
-                // Record Stats for raw file
-                try {
-                    const stats = await fs.stat(filePath);
-                    imageRepository.recordView(stats.size);
-                    imageRepository.incrementViews(relPath);
-                } catch (e) { }
-
-                res.setHeader("Content-Type", mime.lookup(filePath) || 'application/octet-stream');
-                return res.sendFile(filePath);
-            }
-            res.status(500).json({ error: "Image processing failed" });
+            return res.sendFile(previewPath);
         }
 
+        // 回退：用 sharp 压缩原图为 webp
+        const { buffer } = await applySharp(filePath, { fmt: 'webp', q: 80 });
+        try { imageRepository.recordView(buffer.length); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+        res.setHeader("Content-Type", "image/webp");
+        res.setHeader("Cache-Control", "public, max-age=31536000");
+        return res.send(buffer);
     } catch (e) {
-        res.status(400).json({ error: "Error" });
+        console.error("Serve preview error:", e);
+        res.status(400).json({ error: "Error serving preview" });
     }
 }
 
-// 随机图片 (GET)
-// 支持 ?dir=xxx 参数来限定目录
+// ─────────────────────────────────────────────────────────────────────────────
+// 专职辅助：强制返回原图（无参数时直出文件，有处理参数时经 Sharp 处理后返回）
+// ─────────────────────────────────────────────────────────────────────────────
+async function serveRawImage(req, res, relPath) {
+    try {
+        const filePath = safeJoin(STORAGE_PATH, relPath);
+        if (!await fs.pathExists(filePath)) return res.status(404).json({ error: "Not found" });
+
+        getThumbHash(filePath).then(h => { if (!h) generateThumbHash(filePath); });
+
+        const { w, h, q, fmt, rows, cols, idx } = req.query;
+        const hasProcessingParams = w || h || q || fmt || rows || cols || idx !== undefined;
+
+        if (!hasProcessingParams) {
+            const stats = await fs.stat(filePath).catch(() => ({ size: 0 }));
+            try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+            res.setHeader("Content-Type", mime.lookup(filePath) || 'application/octet-stream');
+            res.setHeader("Cache-Control", "public, max-age=86400");
+            return res.sendFile(filePath);
+        }
+
+        try {
+            const { buffer, mime: outMime } = await applySharp(filePath, req.query);
+            try { imageRepository.recordView(buffer.length); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+            res.setHeader("Content-Type", outMime);
+            res.setHeader("Cache-Control", "public, max-age=31536000");
+            return res.send(buffer);
+        } catch (e) {
+            // sharp 处理失败时直接发送原始文件
+            const stats = await fs.stat(filePath).catch(() => ({ size: 0 }));
+            try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+            res.setHeader("Content-Type", mime.lookup(filePath) || 'application/octet-stream');
+            return res.sendFile(filePath);
+        }
+    } catch (e) {
+        console.error("Serve raw error:", e);
+        res.status(400).json({ error: "Error serving image" });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 辅助函数：智能发图（向后兼容——无处理参数用预览图，有参数用原图处理）
+// ─────────────────────────────────────────────────────────────────────────────
+async function serveImage(req, res, relPath) {
+    const { w, h, q, fmt, rows, cols, idx } = req.query;
+    const hasProcessingParams = w || h || q || fmt || rows || cols || idx !== undefined;
+    if (hasProcessingParams) {
+        return serveRawImage(req, res, relPath);
+    } else {
+        return servePreviewImage(req, res, relPath);
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 路由定义
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── 随机图片 ──────────────────────────────────────────────────────────────────
+
+// 随机图片 — 预览图（WebP 优化）
+// GET /api/random/preview?dir=xxx&format=json
+router.get('/random/preview', async (req, res) => {
+    try {
+        let dir = (req.query.dir || "").replace(/\\/g, "/");
+        let allImages = imageRepository.getAll();
+        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
+        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
+        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
+        if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
+        await servePreviewImage(req, res, randomImage.rel_path);
+    } catch (e) {
+        console.error("Random preview error:", e);
+        res.status(500).json({ error: "Failed to get random preview" });
+    }
+});
+
+// 随机图片 — 原图（支持处理参数或 format=json）
+// GET /api/random/raw?dir=xxx&w=800&fmt=webp&format=json
+router.get('/random/raw', async (req, res) => {
+    try {
+        let dir = (req.query.dir || "").replace(/\\/g, "/");
+        let allImages = imageRepository.getAll();
+        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
+        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
+        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
+        if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
+        await serveRawImage(req, res, randomImage.rel_path);
+    } catch (e) {
+        console.error("Random raw error:", e);
+        res.status(500).json({ error: "Failed to get random image" });
+    }
+});
+
+// 随机图片 — 向后兼容（无处理参数用预览图，有参数用原图处理）
+// GET /api/random?dir=xxx&format=json
 router.get('/random', async (req, res) => {
     try {
-        let dir = req.query.dir || "";
-        dir = dir.replace(/\\/g, "/");
-
+        let dir = (req.query.dir || "").replace(/\\/g, "/");
         let allImages = imageRepository.getAll();
-
-        if (dir) {
-            allImages = allImages.filter(img => img.rel_path.startsWith(dir !== "" ? (dir + "/") : ""));
-        }
-
-        if (allImages.length === 0) {
-            return res.status(404).json({ error: "Not Found" });
-        }
-
-        const randomIndex = Math.floor(Math.random() * allImages.length);
-        const randomImage = allImages[randomIndex];
-
-        // START CHANGE: Support format=json
-        // START CHANGE: Support format=json
-        if (req.query.format === 'json') {
-            return res.json(formatImageResponse(req, randomImage));
-        }
-        // END CHANGE
-        // END CHANGE
-
-        // 复用 serveImage
+        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
+        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
+        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
+        if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
         await serveImage(req, res, randomImage.rel_path);
-
     } catch (e) {
         console.error("Random image error:", e);
         res.status(500).json({ error: "Failed to get random image" });
     }
 });
 
-// 服务图片内容
+// ── 指定图片 ──────────────────────────────────────────────────────────────────
+
+// 指定图片 — 预览图（WebP 优化，同步生成）
+// GET /api/images/preview/:path
+router.get('/images/preview/*', async (req, res) => {
+    const relPath = decodeURIComponent(req.params[0]);
+    await servePreviewImage(req, res, relPath);
+});
+
+// 指定图片 — 原图（支持 w/h/q/fmt/rows/cols/idx 处理参数）
+// GET /api/images/raw/:path?w=800&fmt=webp
+router.get('/images/raw/*', async (req, res) => {
+    const relPath = decodeURIComponent(req.params[0]);
+    await serveRawImage(req, res, relPath);
+});
+
+// 指定图片 — 向后兼容（无处理参数用预览图，有参数用原图处理）
+// GET /api/images/:path
 router.get('/images/*', async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     await serveImage(req, res, relPath);
 });
 
-// 服务原始文件（无处理）
+// 原始文件直出（无任何处理，用于下载）
+// GET /api/files/:path
 router.get('/files/*', (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     try {
