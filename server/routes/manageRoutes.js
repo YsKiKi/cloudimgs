@@ -6,6 +6,7 @@ const { requirePassword } = require('../middleware/auth');
 const imageRepository = require('../db/imageRepository');
 const { syncFileSystem } = require('../services/syncService');
 const { safeJoin, TRASH_DIR_NAME, CACHE_DIR_NAME } = require('../utils/fileUtils');
+const previewService = require('../services/previewService'); // 引入预览图服务
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
@@ -123,6 +124,9 @@ router.delete('/images/*', requirePassword, async (req, res) => {
             const cacheFile = path.join(dir, CACHE_DIR_NAME, `${filename}.th`);
             if (await fs.pathExists(cacheFile)) await fs.remove(cacheFile);
 
+            // 删除预览图
+            await previewService.deletePreview(relPath);
+
             // 从 DB 移除
             imageRepository.delete(relPath);
 
@@ -155,6 +159,8 @@ router.delete('/files/*', requirePassword, async (req, res) => {
                 // 真实删除
                 await fs.remove(filePath);
             }
+            // 删除预览图
+            await previewService.deletePreview(relPath);
             // 如果存在则从 DB 移除（可能是通过 upload-file 上传的）
             imageRepository.delete(relPath);
             res.json({ success: true, message: useTrash ? "文件已移至回收站" : "文件已删除" });
@@ -220,7 +226,18 @@ router.post('/batch/move', requirePassword, async (req, res) => {
                         const newCachePath = path.join(newCacheDir, `${path.basename(newFilePath)}.th`);
                         await fs.move(oldCachePath, newCachePath);
                     }
-
+                    // 移动预览图
+                    const oldPreviewPath = await previewService.getPreviewPath(oldRelPath);
+                    if (oldPreviewPath && await fs.pathExists(oldPreviewPath)) {
+                        const newPreviewDir = path.join(
+                            path.dirname(safeJoin(STORAGE_PATH, newRelPath)), 
+                            previewService.PREVIEW_DIR_NAME
+                        );
+                        await fs.ensureDir(newPreviewDir);
+                        const newPreviewFilename = path.parse(path.basename(newFilePath)).name + '.webp';
+                        const newPreviewPath = path.join(newPreviewDir, newPreviewFilename);
+                        await fs.move(oldPreviewPath, newPreviewPath);
+                    }
                     // 更新 DB
                     const dbImage = imageRepository.getByPath(oldRelPath);
                     if (dbImage) {

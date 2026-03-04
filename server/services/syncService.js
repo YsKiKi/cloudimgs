@@ -3,7 +3,7 @@ const path = require('path');
 const config = require('../../config');
 const imageRepository = require('../db/imageRepository');
 const { getFileMetadata } = require('./metadataService');
-const { CACHE_DIR_NAME, safeJoin } = require('../utils/fileUtils');
+const { CACHE_DIR_NAME, PREVIEW_DIR_NAME, safeJoin } = require('../utils/fileUtils');
 
 const STORAGE_PATH = config.storage.path;
 const CONFIG_DIR_NAME = "config";
@@ -69,7 +69,7 @@ async function getAllFiles(dir) {
     try {
         const files = await fs.readdir(absDir);
         for (const file of files) {
-            if (file === CACHE_DIR_NAME || file === CONFIG_DIR_NAME || file === TRASH_DIR_NAME) continue;
+            if (file === CACHE_DIR_NAME || file === CONFIG_DIR_NAME || file === TRASH_DIR_NAME || file === PREVIEW_DIR_NAME) continue;
 
             const filePath = path.join(absDir, file);
             const relPath = path.join(dir, file).replace(/\\/g, "/");

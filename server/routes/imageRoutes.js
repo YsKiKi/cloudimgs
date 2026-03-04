@@ -8,6 +8,7 @@ const imageRepository = require('../db/imageRepository');
 const { requirePassword } = require('../middleware/auth');
 const { safeJoin, getThumbHash, generateThumbHash } = require('../utils/fileUtils');
 const { formatImageResponse } = require('../utils/urlUtils');
+const previewService = require('../services/previewService'); // 引入预览图服务
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
@@ -287,7 +288,42 @@ async function serveImage(req, res, relPath) {
 
         const { w, h, q, fmt, rows, cols, idx } = req.query;
 
-        // Sharp 逻辑
+        // 检查是否有任何处理参数
+        const hasProcessingParams = w || h || q || fmt || rows || cols || idx !== undefined;
+
+        // 如果没有处理参数，尝试使用预览图
+        if (!hasProcessingParams) {
+            const previewPath = await previewService.getPreviewPath(relPath);
+            
+            if (previewPath && await fs.pathExists(previewPath)) {
+                // 使用预览图
+                try {
+                    const stats = await fs.stat(previewPath);
+                    
+                    // 记录统计信息
+                    try {
+                        imageRepository.recordView(stats.size);
+                        imageRepository.incrementViews(relPath);
+                    } catch (e) {
+                        console.error("Stats error", e);
+                    }
+
+                    res.setHeader("Content-Type", "image/webp");
+                    res.setHeader("Cache-Control", "public, max-age=31536000");
+                    return res.sendFile(previewPath);
+                } catch (err) {
+                    console.error("Error serving preview:", err);
+                    // 如果预览图发送失败，回退到处理原图
+                }
+            } else {
+                // 预览图不存在，异步生成（不阻塞当前请求）
+                previewService.generatePreview(filePath, relPath).catch(err => {
+                    console.error('Failed to generate preview on demand:', err);
+                });
+            }
+        }
+
+        // Sharp 逻辑（使用原图或有处理参数）
         try {
             let img = sharp(filePath).rotate();
 

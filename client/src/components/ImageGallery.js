@@ -1668,7 +1668,9 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const handleDownload = (file) => {
     const link = document.createElement("a");
-    link.href = file.url;
+    // 使用 /api/files/ 端点下载原图，而不是 /api/images/ 的预览图
+    const downloadUrl = file.url.replace('/api/images/', '/api/files/');
+    link.href = downloadUrl;
     link.download = file.filename;
     document.body.appendChild(link);
     link.click();

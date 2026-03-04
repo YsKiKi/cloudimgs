@@ -4,6 +4,7 @@ const sharp = require('sharp');
 const config = require('../../config');
 
 const CACHE_DIR_NAME = ".cache";
+const PREVIEW_DIR_NAME = ".preview";
 
 function safeJoin(base, target) {
     const targetPath = path.resolve(base, target || "");
@@ -120,6 +121,7 @@ module.exports = {
     getThumbHash,
     saveBase64Image,
     CACHE_DIR_NAME,
+    PREVIEW_DIR_NAME,
     TRASH_DIR_NAME: ".trash",
     CONFIG_DIR_NAME: "config"
 };

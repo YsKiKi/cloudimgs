@@ -172,6 +172,25 @@ const ApiDocs = () => {
           key="1"
           extra={<FileImageOutlined />}
         >
+          <Card type="inner" title="📖 重要说明：预览图 vs 原图" bordered={false} style={{ background: token.colorInfoBg, marginBottom: 16 }}>
+            <Paragraph>
+              <Text strong>为了优化性能和节省带宽，系统提供了两种访问图片的端点：</Text>
+            </Paragraph>
+            <ul>
+              <li>
+                <Text code>/api/images/:path</Text> - <Tag color="green">推荐用于网页显示</Tag>
+                <br />返回 <Text strong>WebP 压缩预览图</Text>（最大 2048x2048，质量 80%），文件大小通常减少 60-80%，加载更快
+              </li>
+              <li>
+                <Text code>/api/files/:path</Text> - <Tag color="blue">用于下载原图</Tag>
+                <br />返回 <Text strong>原始图片</Text>（无任何处理），保持完整质量
+              </li>
+            </ul>
+            <Paragraph type="secondary" style={{ marginTop: 12 }}>
+              💡 提示：预览图在首次访问时自动生成并缓存在 <Text code>.preview</Text> 目录中
+            </Paragraph>
+          </Card>
+
           <Card type="inner" title="获取图片列表" bordered={false}>
             <div style={endpointStyle}>
               <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
@@ -196,6 +215,56 @@ const ApiDocs = () => {
 
           <Divider />
 
+          <Card type="inner" title="访问图片（预览图优化）" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/images/:path</Text>
+              <CurlButton endpoint="/api/images/photos/sunset.jpg" method="GET" />
+            </div>
+            <Paragraph>
+              访问图片，自动返回 WebP 优化预览图（如果存在）。适合网页展示、API 调用等场景。
+            </Paragraph>
+            <Divider orientation="left" plain>URL 参数（可选，使用原图进行处理）</Divider>
+            <ul>
+              <li><Text code>w</Text>: 目标宽度（像素）</li>
+              <li><Text code>h</Text>: 目标高度（像素）</li>
+              <li><Text code>q</Text>: 图片质量，1-100（默认 80）</li>
+              <li><Text code>fmt</Text>: 输出格式，支持 <Text code>webp</Text>, <Text code>jpeg</Text>, <Text code>png</Text>, <Text code>avif</Text></li>
+              <li><Text code>rows</Text>, <Text code>cols</Text>, <Text code>idx</Text>: 网格切分参数</li>
+            </ul>
+            <Divider orientation="left" plain>示例</Divider>
+            <ul>
+              <li><Text code>/api/images/photo.jpg</Text> - 返回 WebP 预览图（自动优化）</li>
+              <li><Text code>/api/images/photo.jpg?w=500</Text> - 返回宽度 500px 的图片（使用原图处理）</li>
+              <li><Text code>/api/images/photo.jpg?w=800&q=90&fmt=webp</Text> - 返回 800px 宽、90% 质量的 WebP 图片</li>
+            </ul>
+            <Paragraph type="warning" style={{ marginTop: 12 }}>
+              ⚠️ 注意：带任何处理参数时，会使用原图进行实时处理，不使用预览图缓存。
+            </Paragraph>
+          </Card>
+
+          <Divider />
+
+          <Card type="inner" title="下载原图" bordered={false}>
+            <div style={endpointStyle}>
+              <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
+              <Text code copyable>/api/files/:path</Text>
+              <CurlButton endpoint="/api/files/photos/sunset.jpg" method="GET" />
+            </div>
+            <Paragraph>
+              直接下载原始图片，不进行任何处理或优化。适合需要完整质量的场景（下载、编辑、备份等）。
+            </Paragraph>
+            <Divider orientation="left" plain>特点</Divider>
+            <ul>
+              <li>✅ 原始文件格式（PNG/JPG/GIF 等）</li>
+              <li>✅ 原始分辨率</li>
+              <li>✅ 无损质量</li>
+              <li>✅ 不使用预览图缓存</li>
+            </ul>
+          </Card>
+
+          <Divider />
+
           <Card type="inner" title="上传图片" bordered={false}>
             <div style={endpointStyle}>
               <Tag color="green" style={methodTagStyle('POST')}>POST</Tag>
@@ -207,13 +276,16 @@ const ApiDocs = () => {
               />
             </div>
             <Paragraph>
-              上传单张或多张图片到指定目录。
+              上传单张或多张图片到指定目录。<Text strong>上传后会自动生成 WebP 预览图</Text>用于快速访问。
             </Paragraph>
             <Divider orientation="left" plain>Body (FormData)</Divider>
             <ul>
               <li><Text code>image</Text>: 图片文件 (支持多文件)</li>
               <li><Text code>dir</Text>: 目标目录 (可选，默认为根目录)</li>
             </ul>
+            <Paragraph type="secondary" style={{ marginTop: 12 }}>
+              💡 系统会在后台异步生成预览图，不影响上传响应速度
+            </Paragraph>
           </Card>
 
           <Divider />
@@ -225,16 +297,22 @@ const ApiDocs = () => {
               <CurlButton endpoint="/api/random?format=json" method="GET" />
             </div>
             <Paragraph>
-              随机获取一张图片。支持实时图像处理参数（缩放、格式转换等）。
+              随机获取一张图片。默认返回 WebP 预览图，支持实时图像处理参数。
             </Paragraph>
             <Divider orientation="left" plain>参数</Divider>
             <ul>
-              <li><Text code>dir</Text>: 目录路径 (可选)</li>
+              <li><Text code>dir</Text>: 限定目录路径 (可选)</li>
               <li><Text code>format</Text>: 返回格式，<Text code>json</Text> 返回元数据（包含 <Text code>fullUrl</Text>），否则直接返回图片流</li>
-              <li><Text code>w</Text>: 目标宽度 (可选)</li>
-              <li><Text code>h</Text>: 目标高度 (可选)</li>
+              <li><Text code>w</Text>: 目标宽度 (可选，会使用原图处理)</li>
+              <li><Text code>h</Text>: 目标高度 (可选，会使用原图处理)</li>
               <li><Text code>q</Text>: 图片质量，1-100 (可选)</li>
-              <li><Text code>fmt</Text>: 目标格式，支持 <Text code>webp</Text>, <Text code>avif</Text>, <Text code>jpg</Text>, <Text code>png</Text> (可选)</li>
+              <li><Text code>fmt</Text>: 目标格式，支持 <Text code>webp</Text>, <Text code>avif</Text>, <Text code>jpeg</Text>, <Text code>png</Text> (可选)</li>
+            </ul>
+            <Divider orientation="left" plain>示例</Divider>
+            <ul>
+              <li><Text code>/api/random</Text> - 返回随机图片的 WebP 预览图</li>
+              <li><Text code>/api/random?format=json</Text> - 返回随机图片的元数据（JSON）</li>
+              <li><Text code>/api/random?w=800&fmt=jpeg</Text> - 返回 800px 宽的 JPEG 图片</li>
             </ul>
           </Card>
 
@@ -254,7 +332,7 @@ const ApiDocs = () => {
               />
             </div>
             <Paragraph>
-              通过 Base64 字符串上传图片。
+              通过 Base64 字符串上传图片。<Text strong>上传后会自动生成 WebP 预览图</Text>。
             </Paragraph>
             <Divider orientation="left" plain>Body (JSON)</Divider>
             <ul>
@@ -323,7 +401,7 @@ const ApiDocs = () => {
               />
             </div>
             <Paragraph>
-              上传任意类型文件，支持自动解析音视频时长。
+              上传任意类型文件，支持自动解析音视频时长。图片文件会自动生成预览图。
             </Paragraph>
             <Divider orientation="left" plain>Body (FormData)</Divider>
             <ul>

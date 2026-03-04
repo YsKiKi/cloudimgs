@@ -9,6 +9,7 @@ const { formatImageResponse } = require('../utils/urlUtils');
 const imageRepository = require('../db/imageRepository');
 const { getFileMetadata, parseAudioDuration } = require('../services/metadataService');
 const clipService = require('../services/clipService'); // 引入 ClipService
+const previewService = require('../services/previewService'); // 引入预览图服务
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
@@ -83,6 +84,11 @@ router.post('/upload-base64', requirePassword, async (req, res) => {
         // 记录上传统计信息
         imageRepository.recordUpload(size);
 
+        // 生成 WebP 预览图（异步，不阻塞响应）
+        previewService.generatePreview(filePath, relPath).catch(err => {
+            console.error('Failed to generate preview:', err);
+        });
+
         // 使用 helper 格式化
         const formatted = formatImageResponse(req, imageRepository.getByPath(relPath) || {
             filename: fileInfo.filename,
@@ -156,6 +162,11 @@ router.post('/upload', requirePassword, upload.any(), handleMulterError, async (
 
         // 记录上传统计信息
         imageRepository.recordUpload(req.file.size);
+
+        // 生成 WebP 预览图（异步，不阻塞响应）
+        previewService.generatePreview(req.file.path, relPath).catch(err => {
+            console.error('Failed to generate preview:', err);
+        });
 
         // Helper
         const formatted = formatImageResponse(req, {
@@ -247,7 +258,10 @@ router.post('/upload-file', requirePassword, uploadAny.single("file"), handleMul
                 rel_path: relPath,
                 ...metadata
             });
-        }
+            // 生成 WebP 预览图（异步，不阻塞响应）
+            previewService.generatePreview(filePath, relPath).catch(err => {
+                console.error('Failed to generate preview:', err);
+            });        }
 
         // 时长逻辑
         let duration = null;
