@@ -137,9 +137,11 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       // 如果超时时间不为0，则设置超时；为0时表示无超时限制
       if (fileTimeout !== 0) {
         axiosConfig.timeout = fileTimeout;
+      } else {
+        axiosConfig.timeout = 0; // 显式设置为0（无限制）
       }
       
-      const response = await api.post(url, formData, axiosConfig);
+      const response = await api.postWithTimeout(url, formData, axiosConfig);
 
       if (response.data.success) {
         const fileData = response.data.data;

@@ -396,7 +396,7 @@ const api = axios.create({
 
 // 为上传创建一个扩展方法，支持自定义超时
 api.postWithTimeout = function(url, data, config = {}) {
-  // 合并配置，自定义超时优先
+  // 合并配置，如果设置了timeout且为0（无限制），则使用0，否则使用传入的timeout或默认值
   const mergedConfig = {
     ...config,
     timeout: config.timeout !== undefined ? config.timeout : this.defaults.timeout
