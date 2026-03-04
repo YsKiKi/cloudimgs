@@ -104,7 +104,18 @@ router.delete('/images/*', requirePassword, async (req, res) => {
     try {
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (await fs.pathExists(filePath)) {
-            await moveToTrash(filePath);
+            // 从请求参数中读取策略，或使用配置文件中的默认值
+            const useTrashParam = req.query.useTrash;
+            const useTrash = useTrashParam !== undefined 
+                ? useTrashParam === 'true' 
+                : (config.deletion && config.deletion.useTrash);
+            
+            if (useTrash) {
+                await moveToTrash(filePath);
+            } else {
+                // 真实删除
+                await fs.remove(filePath);
+            }
 
             // 移除 thumbhash
             const dir = path.dirname(filePath);
@@ -132,10 +143,21 @@ router.delete('/files/*', requirePassword, async (req, res) => {
     try {
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (await fs.pathExists(filePath)) {
-            await moveToTrash(filePath);
+            // 从请求参数中读取策略，或使用配置文件中的默认值
+            const useTrashParam = req.query.useTrash;
+            const useTrash = useTrashParam !== undefined 
+                ? useTrashParam === 'true' 
+                : (config.deletion && config.deletion.useTrash);
+            
+            if (useTrash) {
+                await moveToTrash(filePath);
+            } else {
+                // 真实删除
+                await fs.remove(filePath);
+            }
             // 如果存在则从 DB 移除（可能是通过 upload-file 上传的）
             imageRepository.delete(relPath);
-            res.json({ success: true, message: "文件已移至回收站" });
+            res.json({ success: true, message: useTrash ? "文件已移至回收站" : "文件已删除" });
         } else {
             res.status(404).json({ error: "文件不存在" });
         }

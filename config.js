@@ -37,6 +37,17 @@ module.exports = {
     thumbnailWidth: process.env.THUMBNAIL_WIDTH
       ? parseInt(process.env.THUMBNAIL_WIDTH)
       : 0,
+
+    // 单个文件上传超时时间（毫秒）
+    timeout: process.env.UPLOAD_TIMEOUT
+      ? parseInt(process.env.UPLOAD_TIMEOUT)
+      : 120000, // 默认120秒（2分钟）
+  },
+
+  // 删除配置
+  deletion: {
+    // 是否使用回收站（false 为真实删除）
+    useTrash: process.env.USE_TRASH !== "false", // 默认使用回收站
   },
 
   // 存储配置

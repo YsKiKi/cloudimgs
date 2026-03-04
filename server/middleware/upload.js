@@ -62,6 +62,9 @@ const storage = multer.diskStorage({
             return cb(null, sanitizedName);
         }
 
+        // 从请求参数中读取策略，或使用配置文件中的默认值
+        const strategy = req.query.duplicateStrategy || req.body?.duplicateStrategy || config.upload.duplicateStrategy;
+
         const ext = path.extname(sanitizedName);
         const nameWithoutExt = path.basename(sanitizedName, ext);
         let finalName = sanitizedName;
@@ -73,11 +76,11 @@ const storage = multer.diskStorage({
 
         if (!config.upload.allowDuplicateNames) {
             while (fs.existsSync(path.join(dest, finalName))) {
-                if (config.upload.duplicateStrategy === "timestamp") {
+                if (strategy === "timestamp") {
                     finalName = `${nameWithoutExt}_${Date.now()}_${counter}${ext}`;
-                } else if (config.upload.duplicateStrategy === "counter") {
+                } else if (strategy === "counter") {
                     finalName = `${nameWithoutExt}_${counter}${ext}`;
-                } else if (config.upload.duplicateStrategy === "overwrite") {
+                } else if (strategy === "overwrite") {
                     break;
                 }
                 counter++;

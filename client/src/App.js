@@ -105,8 +105,10 @@ function App() {
     try {
       const hide = message.loading("正在删除...", 0);
       // Execute deletions in parallel
+      // 读取用户设置的删除策略
+      const useTrash = localStorage.getItem("useTrash") !== "false";
       const promises = Array.from(selectedItems).map(relPath =>
-        api.delete(`/images/${encodeURIComponent(relPath)}`)
+        api.delete(`/images/${encodeURIComponent(relPath)}?useTrash=${useTrash}`)
       );
 
       await Promise.all(promises);

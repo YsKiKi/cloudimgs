@@ -317,9 +317,11 @@ const AlbumManager = ({ visible, onClose, api, onSelectAlbum }) => {
       cancelText: "取消",
       onOk: async () => {
         try {
+          // 读取用户设置的删除策略
+          const useTrash = localStorage.getItem("useTrash") !== "false";
           // DELETE /api/images/* works for directories too (fs.remove)
-          await api.delete(`/images/${encodeURIComponent(album.path)}`);
-          message.success("相册已删除");
+          await api.delete(`/images/${encodeURIComponent(album.path)}?useTrash=${useTrash}`);
+          message.success(useTrash ? "相册已移至回收站" : "相册已删除");
           fetchAlbums();
         } catch (e) {
           message.error("删除失败");

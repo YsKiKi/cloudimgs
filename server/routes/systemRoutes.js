@@ -26,7 +26,8 @@ router.get('/config', (req, res) => {
         data: {
             upload: {
                 maxFileSize: config.upload.maxFileSize,
-                allowedExtensions: config.upload.allowedExtensions
+                allowedExtensions: config.upload.allowedExtensions,
+                timeout: config.upload.timeout
             },
             storage: {
                 filename: config.storage.filename

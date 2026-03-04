@@ -161,8 +161,10 @@ function MapPage() {
 
   const handleDelete = async (relPath) => {
     try {
-      await api.delete(`/images/${encodeURIComponent(relPath)}`);
-      message.success("删除成功");
+      // 读取用户设置的删除策略
+      const useTrash = localStorage.getItem("useTrash") !== "false";
+      await api.delete(`/images/${encodeURIComponent(relPath)}?useTrash=${useTrash}`);
+      message.success(useTrash ? "已移至回收站" : "删除成功");
       setState(prev => ({
         ...prev,
         markers: prev.markers.filter(m => m.relPath !== relPath)

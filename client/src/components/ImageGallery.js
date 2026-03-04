@@ -1544,8 +1544,10 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const handleDelete = async (relPath) => {
     try {
-      await api.delete(`/images/${encodePath(relPath)}`);
-      message.success("删除成功");
+      // 读取用户设置的删除策略
+      const useTrash = localStorage.getItem("useTrash") !== "false";
+      await api.delete(`/images/${encodePath(relPath)}?useTrash=${useTrash}`);
+      message.success(useTrash ? "已移至回收站" : "删除成功");
       setImages((prev) => prev.filter((img) => img.relPath !== relPath));
       const ps = pagination.pageSize || pageSize;
       const newTotal = Math.max(0, (pagination.total || images.length) - 1);

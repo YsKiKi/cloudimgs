@@ -390,9 +390,19 @@ const mockAdapter = async (config) => {
 // 创建axios实例
 const api = axios.create({
   baseURL: "/api",
-  timeout: 30000,
+  timeout: 30000, // 默认超时30秒（用于一般API请求）
   adapter: isMock ? mockAdapter : undefined,
 });
+
+// 为上传创建一个扩展方法，支持自定义超时
+api.postWithTimeout = function(url, data, config = {}) {
+  // 合并配置，自定义超时优先
+  const mergedConfig = {
+    ...config,
+    timeout: config.timeout !== undefined ? config.timeout : this.defaults.timeout
+  };
+  return this.post(url, data, mergedConfig);
+};
 
 // 请求拦截器 - 添加密码到请求头
 api.interceptors.request.use(

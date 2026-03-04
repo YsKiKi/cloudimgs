@@ -17,8 +17,10 @@ import {
   DeleteOutlined,
   DeliveredProcedureOutlined,
   GlobalOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import UploadComponent from "./UploadComponent";
+import SettingsModal from "./SettingsModal";
 
 const FloatingToolbar = ({
   onThemeChange,
@@ -33,6 +35,7 @@ const FloatingToolbar = ({
   onBatchMove,
 }) => {
   const [uploadVisible, setUploadVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const { token } = theme.useToken();
   
   // Infer dark mode
@@ -194,6 +197,20 @@ const FloatingToolbar = ({
           />
         </Tooltip>
 
+        <div style={{ width: 1, height: 16, background: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
+
+        <Tooltip title="设置" placement="top">
+          <Button
+            shape="circle"
+            icon={<SettingOutlined />}
+            onClick={() => setSettingsVisible(true)}
+            size="middle"
+            type="text"
+            style={buttonStyle}
+            className="toolbar-btn"
+          />
+        </Tooltip>
+
         {isMobile && (
           <>
             <div style={{ width: 1, height: 16, background: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
@@ -318,6 +335,12 @@ const FloatingToolbar = ({
             <UploadComponent onUploadSuccess={handleUploadSuccess} api={api} isModal={true} />
         </div>
       </Modal>
+
+      <SettingsModal
+        visible={settingsVisible}
+        onClose={() => setSettingsVisible(false)}
+        isDarkMode={isDarkMode}
+      />
     </>
   );
 };

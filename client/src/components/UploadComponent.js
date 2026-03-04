@@ -56,6 +56,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     maxFileSize: 10 * 1024 * 1024,
     maxFileSizeMB: 10,
     allowedFormats: "JPG, JPEG, PNG, GIF, WEBP, BMP, SVG",
+    timeout: 120000, // 默认120秒
   });
 
   const uploading = uploadQueue.some(item => item.status === 'pending' || item.status === 'uploading');
@@ -66,10 +67,28 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       try {
         const response = await api.get("/config");
         if (response.data.success) {
-          setConfig(response.data.data.upload);
+          const uploadConfig = response.data.data.upload;
+          
+          // 优先使用用户自定义的超时设置（localStorage）
+          const customTimeout = localStorage.getItem("uploadTimeout");
+          const timeoutValue = customTimeout ? parseInt(customTimeout) : (uploadConfig.timeout || 120000);
+          
+          setConfig(prev => ({
+            ...prev,
+            ...uploadConfig,
+            timeout: timeoutValue
+          }));
         }
       } catch (error) {
         console.warn("获取配置失败，使用默认配置:", error);
+        // 即使获取配置失败，也要尝试使用localStorage中的设置
+        const customTimeout = localStorage.getItem("uploadTimeout");
+        if (customTimeout) {
+          setConfig(prev => ({
+            ...prev,
+            timeout: parseInt(customTimeout)
+          }));
+        }
       }
     };
     fetchConfig();
@@ -94,15 +113,19 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     const fileName = file.name;
     formData.append("image", file, fileName);
 
+    // 读取用户设置的文件命名策略
+    const duplicateStrategy = localStorage.getItem("duplicateStrategy") || "timestamp";
+
     const url = safeDir
-      ? `/upload?dir=${encodeURIComponent(safeDir)}`
-      : "/upload";
+      ? `/upload?dir=${encodeURIComponent(safeDir)}&duplicateStrategy=${duplicateStrategy}`
+      : `/upload?duplicateStrategy=${duplicateStrategy}`;
 
     try {
       const response = await api.post(url, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
+        timeout: config.timeout, // 为每个文件单独设置超时时间
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round(
             (progressEvent.loaded * 100) / progressEvent.total

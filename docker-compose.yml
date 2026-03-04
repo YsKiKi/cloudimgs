@@ -2,8 +2,7 @@ version: "3.8"
 
 services:
   cloudimgs:
-    # 使用 GitHub Packages 镜像
-    image: qazzxxx/cloudimgs:latest
+    image: wuyuekiki/cloudimgs:latest
     ports:
       - "3001:3001"
     volumes:

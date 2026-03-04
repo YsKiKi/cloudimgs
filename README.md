@@ -139,6 +139,22 @@ services:
 
 ---
 
-## 📈 历史 Star | Star History
+## � 构建自己的 Docker 镜像 | Build Your Own
+
+如果您 fork 了这个项目并想发布自己的 Docker 镜像：
+
+### 📖 快速指南
+查看详细文档：[DOCKER_QUICKSTART.md](./DOCKER_QUICKSTART.md)
+
+### ⚡ 3 步完成
+1. **修改配置**：将 `docker-compose.yml` 中的镜像名改为 `your-username/cloudimgs:latest`
+2. **设置 Secrets**：在 GitHub 仓库中配置 `DOCKER_USERNAME` 和 `DOCKER_PASSWORD`
+3. **触发构建**：访问 Actions → Docker Publish → Run workflow
+
+完整配置文档请查看：[DOCKER_SETUP.md](./DOCKER_SETUP.md)
+
+---
+
+## �📈 历史 Star | Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=qazzxxx/cloudimgs&type=date&legend=top-left)](https://www.star-history.com/#qazzxxx/cloudimgs&type=date&legend=top-left)
