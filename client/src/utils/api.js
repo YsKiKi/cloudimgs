@@ -394,30 +394,17 @@ const api = axios.create({
   adapter: isMock ? mockAdapter : undefined,
 });
 
-// 为上传创建一个扩展方法，支持自定义超时
-api.postWithTimeout = function(url, data, config = {}) {
-  // 处理 Axios 版本中 timeout 为 0 可能被当作 falsy 而使用默认配置的 bug
-  let finalTimeout = config.timeout !== undefined ? config.timeout : this.defaults.timeout;
-  
-  // 如果最终决定的 timeout 是 0，则使用一个极大的值（近24天）来达到“无超时限制”的效果
-  if (finalTimeout === 0) {
-    finalTimeout = 2147483647; 
-  }
-
-  const mergedConfig = {
-    ...config,
-    timeout: finalTimeout
-  };
-  
-  return this.post(url, data, mergedConfig);
-};
-
-// 请求拦截器 - 添加密码到请求头
+// 请求拦截器 - 添加密码到请求头 & 上传请求强制取消超时
 api.interceptors.request.use(
   (config) => {
     const password = getPassword();
     if (password) {
       config.headers["X-Access-Password"] = password;
+    }
+    // 对上传请求(multipart/form-data)强制取消超时限制
+    const contentType = config.headers?.["Content-Type"] || config.headers?.["content-type"] || "";
+    if (typeof contentType === "string" && contentType.includes("multipart/form-data")) {
+      config.timeout = 0;
     }
     return config;
   },
@@ -425,7 +412,6 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
-
 // 响应拦截器 - 处理密码错误
 api.interceptors.response.use(
   (response) => {

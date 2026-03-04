@@ -56,7 +56,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     maxFileSize: 10 * 1024 * 1024,
     maxFileSizeMB: 10,
     allowedFormats: "JPG, JPEG, PNG, GIF, WEBP, BMP, SVG",
-    timeout: 120000, // 默认120秒
+    concurrency: parseInt(localStorage.getItem("uploadConcurrency")) || 3, // 默认并发3
   });
 
   const uploading = uploadQueue.some(item => item.status === 'pending' || item.status === 'uploading');
@@ -69,24 +69,24 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
         if (response.data.success) {
           const uploadConfig = response.data.data.upload;
           
-          // 优先使用用户自定义的超时设置（localStorage）
-          const customTimeout = localStorage.getItem("uploadTimeout");
-          const timeoutValue = customTimeout ? parseInt(customTimeout) : (uploadConfig.timeout || 120000);
+          // 读取用户自定义的并发数设置
+          const customConcurrency = localStorage.getItem("uploadConcurrency");
+          const concurrencyValue = customConcurrency ? parseInt(customConcurrency) : 3;
           
           setConfig(prev => ({
             ...prev,
             ...uploadConfig,
-            timeout: timeoutValue
+            concurrency: concurrencyValue
           }));
         }
       } catch (error) {
         console.warn("获取配置失败，使用默认配置:", error);
         // 即使获取配置失败，也要尝试使用localStorage中的设置
-        const customTimeout = localStorage.getItem("uploadTimeout");
-        if (customTimeout) {
+        const customConcurrency = localStorage.getItem("uploadConcurrency");
+        if (customConcurrency) {
           setConfig(prev => ({
             ...prev,
-            timeout: parseInt(customTimeout)
+            concurrency: parseInt(customConcurrency)
           }));
         }
       }
@@ -101,7 +101,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
   };
 
   // 上传文件的通用方法
-  const uploadFile = React.useCallback(async (file, onProgress, fileTimeout) => {
+  const uploadFile = React.useCallback(async (file, onProgress) => {
     let safeDir = sanitizeDir(dir);
     if (safeDir.includes("..")) {
       throw new Error("目录不能包含 .. 等非法字符");
@@ -121,7 +121,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       : `/upload?duplicateStrategy=${duplicateStrategy}`;
 
     try {
-      // 配置axios请求选项
+      // 配置axios请求选项（超时由拦截器对multipart请求自动取消）
       const axiosConfig = {
         headers: {
           "Content-Type": "multipart/form-data",
@@ -134,14 +134,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
         },
       };
       
-      // 如果超时时间不为0，则设置超时；为0时表示无超时限制
-      if (fileTimeout !== 0) {
-        axiosConfig.timeout = fileTimeout;
-      } else {
-        axiosConfig.timeout = 0; // 显式设置为0（无限制）
-      }
-      
-      const response = await api.postWithTimeout(url, formData, axiosConfig);
+      const response = await api.post(url, formData, axiosConfig);
 
       if (response.data.success) {
         const fileData = response.data.data;
@@ -161,6 +154,42 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       throw new Error(msg);
     }
   }, [dir, api, onUploadSuccess]);
+
+  // 并发上传队列处理器
+  const startedUidsRef = React.useRef(new Set());
+
+  React.useEffect(() => {
+    if (uploadQueue.length === 0) {
+      startedUidsRef.current.clear();
+      return;
+    }
+
+    const uploadingCount = uploadQueue.filter(i => i.status === 'uploading').length;
+    const pendingItems = uploadQueue.filter(i => i.status === 'pending' && i.file && !startedUidsRef.current.has(i.uid));
+    const slotsAvailable = config.concurrency - uploadingCount;
+
+    if (slotsAvailable <= 0 || pendingItems.length === 0) return;
+
+    const toStart = pendingItems.slice(0, slotsAvailable);
+
+    toStart.forEach(item => {
+      startedUidsRef.current.add(item.uid);
+      updateQueueItem(item.uid, { status: 'uploading' });
+
+      (async () => {
+        try {
+          await uploadFile(item.file, (progress) => {
+            updateQueueItem(item.uid, { progress, status: 'uploading' });
+          });
+          updateQueueItem(item.uid, { progress: 100, status: 'success' });
+          if (item.onSuccess) item.onSuccess();
+        } catch (error) {
+          updateQueueItem(item.uid, { status: 'error', errorMsg: error.message });
+          if (item.onError) item.onError(error);
+        }
+      })();
+    });
+  }, [uploadQueue, config.concurrency, uploadFile]);
 
   // 处理粘贴的图片/视频
   const handlePastedImage = React.useCallback(async (file) => {
@@ -189,22 +218,9 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     // 添加uid
     renamedFile.uid = `pasted-${timestamp}`;
 
-    // 添加到队列
-    setUploadQueue(prev => [...prev, { uid: renamedFile.uid, name: fileName, progress: 0, status: 'pending' }]);
-
-    // 获取当前的超时设置（为该文件捕获独立的超时时间）
-    const currentTimeout = config.timeout;
-
-    // 上传文件
-    try {
-      await uploadFile(renamedFile, (progress) => {
-        updateQueueItem(renamedFile.uid, { progress, status: 'uploading' });
-      }, currentTimeout);
-      updateQueueItem(renamedFile.uid, { progress: 100, status: 'success' });
-    } catch (error) {
-      updateQueueItem(renamedFile.uid, { status: 'error', errorMsg: error.message });
-    }
-  }, [config, uploadFile]);
+    // 添加到队列（由并发队列处理器自动处理上传）
+    setUploadQueue(prev => [...prev, { uid: renamedFile.uid, name: fileName, progress: 0, status: 'pending', file: renamedFile }]);
+  }, [config]);
 
   // 处理粘贴事件
   const handlePaste = React.useCallback(async (event) => {
@@ -276,23 +292,10 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       }
       return true;
     },
-    customRequest: async ({ file, onSuccess, onError }) => {
+    customRequest: ({ file, onSuccess, onError }) => {
       const uid = file.uid;
-      setUploadQueue(prev => [...prev, { uid, name: file.name, progress: 0, status: 'pending' }]);
-
-      // 获取当前的超时设置（为该文件捕获独立的超时时间）
-      const currentTimeout = config.timeout;
-
-      try {
-        await uploadFile(file, (progress) => {
-          updateQueueItem(uid, { progress, status: 'uploading' });
-        }, currentTimeout);
-        updateQueueItem(uid, { progress: 100, status: 'success' });
-        onSuccess();
-      } catch (error) {
-        updateQueueItem(uid, { status: 'error', errorMsg: error.message });
-        onError(error);
-      }
+      // 仅将文件加入待上传队列，不立即开始上传
+      setUploadQueue(prev => [...prev, { uid, name: file.name, progress: 0, status: 'pending', file, onSuccess, onError }]);
     },
   };
 

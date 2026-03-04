@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Form, InputNumber, Divider, Typography, Space, message, theme, Radio, Switch } from "antd";
-import { ClockCircleOutlined, DeleteOutlined, FileOutlined } from "@ant-design/icons";
+import { CloudUploadOutlined, DeleteOutlined, FileOutlined } from "@ant-design/icons";
 
 const { Title, Text } = Typography;
 
@@ -12,12 +12,12 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
   // 加载设置
   useEffect(() => {
     if (visible) {
-      const savedTimeout = localStorage.getItem("uploadTimeout");
+      const savedConcurrency = localStorage.getItem("uploadConcurrency");
       const savedUseTrash = localStorage.getItem("useTrash");
       const savedDuplicateStrategy = localStorage.getItem("duplicateStrategy");
       
       form.setFieldsValue({
-        uploadTimeout: savedTimeout ? parseInt(savedTimeout) / 1000 : 120, // 转换为秒
+        uploadConcurrency: savedConcurrency ? parseInt(savedConcurrency) : 3,
         useTrash: savedUseTrash !== null ? savedUseTrash === "true" : true, // 默认使用回收站
         duplicateStrategy: savedDuplicateStrategy || "timestamp", // 默认timestamp
       });
@@ -30,8 +30,7 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
       const values = await form.validateFields();
       
       // 保存到 localStorage
-      const timeoutMs = values.uploadTimeout * 1000;
-      localStorage.setItem("uploadTimeout", timeoutMs.toString());
+      localStorage.setItem("uploadConcurrency", values.uploadConcurrency.toString());
       localStorage.setItem("useTrash", values.useTrash.toString());
       localStorage.setItem("duplicateStrategy", values.duplicateStrategy);
       
@@ -50,7 +49,7 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
 
   const handleReset = () => {
     form.setFieldsValue({
-      uploadTimeout: 120, // 默认120秒
+      uploadConcurrency: 3, // 默认并发3
       useTrash: true, // 默认使用回收站
       duplicateStrategy: "timestamp", // 默认timestamp
     });
@@ -99,37 +98,37 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
         <Form form={form} layout="vertical" requiredMark={false}>
           <Divider orientation="left" style={{ marginTop: 0 }}>
             <Space>
-              <ClockCircleOutlined />
-              <Text strong>超时设置</Text>
+              <CloudUploadOutlined />
+              <Text strong>上传设置</Text>
             </Space>
           </Divider>
 
           <Form.Item
-            name="uploadTimeout"
-            label="单个文件上传超时时间"
-            tooltip="每张图片上传的最大等待时间，超过此时间将显示超时错误"
+            name="uploadConcurrency"
+            label="同时上传文件数"
+            tooltip="同时并发上传的文件数量，上传不设超时限制"
             rules={[
-              { required: true, message: "请输入超时时间" },
+              { required: true, message: "请输入并发数" },
               {
                 type: "number",
-                min: 0,
-                max: 3600,
-                message: "超时时间必须在 0-3600 秒之间 (设为0表示无限制)",
+                min: 1,
+                max: 10,
+                message: "并发数必须在 1-10 之间",
               },
             ]}
           >
             <InputNumber
-              min={0}
-              max={3600}
-              step={10}
-              addonAfter="秒"
+              min={1}
+              max={10}
+              step={1}
+              addonAfter="个"
               style={{ width: "100%" }}
-              placeholder="120 (0表示无限制)"
+              placeholder="3"
             />
           </Form.Item>
 
           <Text type="secondary" style={{ fontSize: 12 }}>
-            说明：设为 0 表示不限制上传时间。上传多张图片时，每张图片都有独立的超时计时。建议根据网络速度和文件大小调整此值。
+            说明：上传不设超时限制。此值控制同时并发上传的文件数量，值越大上传越快但占用带宽越多。建议设为 2-5。
           </Text>
 
           <Divider orientation="left">
