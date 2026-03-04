@@ -396,11 +396,19 @@ const api = axios.create({
 
 // 为上传创建一个扩展方法，支持自定义超时
 api.postWithTimeout = function(url, data, config = {}) {
-  // 合并配置，如果设置了timeout且为0（无限制），则使用0，否则使用传入的timeout或默认值
+  // 处理 Axios 版本中 timeout 为 0 可能被当作 falsy 而使用默认配置的 bug
+  let finalTimeout = config.timeout !== undefined ? config.timeout : this.defaults.timeout;
+  
+  // 如果最终决定的 timeout 是 0，则使用一个极大的值（近24天）来达到“无超时限制”的效果
+  if (finalTimeout === 0) {
+    finalTimeout = 2147483647; 
+  }
+
   const mergedConfig = {
     ...config,
-    timeout: config.timeout !== undefined ? config.timeout : this.defaults.timeout
+    timeout: finalTimeout
   };
+  
   return this.post(url, data, mergedConfig);
 };
 
