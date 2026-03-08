@@ -78,9 +78,17 @@ const ImageItem = ({
 }) => {
   const [loaded, setLoaded] = useState(false);
   const videoRef = useRef(null);
+  const imgRef = useRef(null);
   const {
     token: { colorBgContainer, colorPrimary },
   } = theme.useToken();
+
+  // 检查图片是否已经从缓存加载完成
+  useEffect(() => {
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalHeight > 0) {
+      setLoaded(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -231,11 +239,22 @@ const ImageItem = ({
           }
           return (
             <img
+              ref={imgRef}
               alt={image.filename}
               src={thumbnailWidth > 0 ? `${image.url}?w=${thumbnailWidth}` : image.url}
               draggable={false}
               loading="lazy"
-              onLoad={() => setLoaded(true)}
+              onLoad={(e) => {
+                // 确保图片真正加载完成
+                if (e.target.complete && e.target.naturalHeight > 0) {
+                  setLoaded(true);
+                }
+              }}
+              onError={(e) => {
+                // 加载失败时也显示（避免永远空白）
+                console.warn('图片加载失败:', image.url);
+                setLoaded(true);
+              }}
               style={{
                 width: "100%",
                 display: "block",
