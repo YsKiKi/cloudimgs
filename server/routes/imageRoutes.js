@@ -350,20 +350,30 @@ async function servePreviewImage(req, res, relPath) {
 
         if (previewPath && await fs.pathExists(previewPath)) {
             const stats = await fs.stat(previewPath).catch(() => ({ size: 0 }));
-            try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
-            res.setHeader("Content-Type", "image/webp");
-            res.setHeader("Cache-Control", "public, max-age=31536000");
-            return res.sendFile(previewPath);
+            // Guard: don't serve empty/corrupt preview files
+            if (stats.size > 0) {
+                try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+                res.setHeader("Content-Type", "image/webp");
+                res.setHeader("Cache-Control", "public, max-age=31536000");
+                return res.sendFile(previewPath);
+            } else {
+                // Remove corrupt preview so it can be regenerated next time
+                await fs.remove(previewPath).catch(() => {});
+            }
         }
 
         // 回退：用 sharp 压缩原图为 webp
         const { buffer } = await applySharp(filePath, { fmt: 'webp', q: 80 });
+        if (!buffer || buffer.length === 0) {
+            return res.status(500).json({ error: "Failed to generate image" });
+        }
         try { imageRepository.recordView(buffer.length); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
         res.setHeader("Content-Type", "image/webp");
         res.setHeader("Cache-Control", "public, max-age=31536000");
         return res.send(buffer);
     } catch (e) {
         console.error("Serve preview error:", e);
+        res.setHeader("Cache-Control", "no-store");
         res.status(400).json({ error: "Error serving preview" });
     }
 }
@@ -391,6 +401,13 @@ async function serveRawImage(req, res, relPath) {
 
         try {
             const { buffer, mime: outMime } = await applySharp(filePath, req.query);
+            if (!buffer || buffer.length === 0) {
+                // Sharp returned empty buffer - fallback to original
+                const stats = await fs.stat(filePath).catch(() => ({ size: 0 }));
+                try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
+                res.setHeader("Content-Type", mime.lookup(filePath) || 'application/octet-stream');
+                return res.sendFile(filePath);
+            }
             try { imageRepository.recordView(buffer.length); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
             res.setHeader("Content-Type", outMime);
             res.setHeader("Cache-Control", "public, max-age=31536000");
@@ -404,6 +421,7 @@ async function serveRawImage(req, res, relPath) {
         }
     } catch (e) {
         console.error("Serve raw error:", e);
+        res.setHeader("Cache-Control", "no-store");
         res.status(400).json({ error: "Error serving image" });
     }
 }

@@ -77,18 +77,39 @@ const ImageItem = ({
   thumbnailWidth = 0
 }) => {
   const [loaded, setLoaded] = useState(false);
-  const videoRef = useRef(null);
+  const [retryCount, setRetryCount] = useState(0);
   const imgRef = useRef(null);
+  const videoRef = useRef(null);
   const {
     token: { colorBgContainer, colorPrimary },
   } = theme.useToken();
 
-  // 检查图片是否已经从缓存加载完成
-  useEffect(() => {
-    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalHeight > 0) {
+  // Handle image load error: retry with cache-busting, max 2 retries
+  const handleImageError = useCallback(() => {
+    if (retryCount < 2) {
+      setRetryCount(prev => prev + 1);
+    } else {
+      // After retries exhausted, force show (thumbhash placeholder will remain visible)
       setLoaded(true);
     }
-  }, []);
+  }, [retryCount]);
+
+  // Build image src with optional cache-busting on retry
+  const getImageSrc = useCallback(() => {
+    const base = thumbnailWidth > 0 ? `${image.url}?w=${thumbnailWidth}` : image.url;
+    if (retryCount === 0) return base;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}_r=${retryCount}`;
+  }, [image.url, thumbnailWidth, retryCount]);
+
+  // Fallback: if image stays unloaded for too long, force reveal
+  useEffect(() => {
+    if (loaded) return;
+    const timer = setTimeout(() => {
+      if (!loaded) setLoaded(true);
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [loaded]);
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -234,6 +255,7 @@ const ImageItem = ({
                   zIndex: 2,
                 }}
                 onLoadedData={() => setLoaded(true)}
+                onError={() => setLoaded(true)}
               />
             );
           }
@@ -241,20 +263,11 @@ const ImageItem = ({
             <img
               ref={imgRef}
               alt={image.filename}
-              src={thumbnailWidth > 0 ? `${image.url}?w=${thumbnailWidth}` : image.url}
+              src={getImageSrc()}
               draggable={false}
               loading="lazy"
-              onLoad={(e) => {
-                // 确保图片真正加载完成
-                if (e.target.complete && e.target.naturalHeight > 0) {
-                  setLoaded(true);
-                }
-              }}
-              onError={(e) => {
-                // 加载失败时也显示（避免永远空白）
-                console.warn('图片加载失败:', image.url);
-                setLoaded(true);
-              }}
+              onLoad={() => setLoaded(true)}
+              onError={handleImageError}
               style={{
                 width: "100%",
                 display: "block",
