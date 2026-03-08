@@ -22,7 +22,30 @@ const PORT = config.server.port || 5000; // fallback
 // 中间件
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(path.join(__dirname, "../client/build")));
+
+// 静态文件服务 - 设置合适的缓存策略
+app.use(express.static(path.join(__dirname, "../client/build"), {
+  setHeaders: (res, filePath) => {
+    // HTML 文件不缓存，确保总是获取最新版本
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    // CSS、JS、字体等静态资源（带hash）长期缓存
+    else if (/\.(css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|ico|webp)$/i.test(filePath)) {
+      // 带hash的文件可以长期缓存（1年）
+      if (/\.[a-f0-9]{8}\.(css|js)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } 
+      // 其他资源适中缓存（1天）
+      else {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    }
+  }
+}));
+
 app.enable("trust proxy");
 
 // 路由
@@ -107,6 +130,10 @@ app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "Not Found" });
   }
+  // 设置 index.html 不缓存
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, "../client/build", "index.html"));
 });
 
