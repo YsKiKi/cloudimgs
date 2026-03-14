@@ -5,29 +5,13 @@ const config = require('../../config');
 const { requirePassword } = require('../middleware/auth');
 const imageRepository = require('../db/imageRepository');
 const { syncFileSystem } = require('../services/syncService');
-const { safeJoin, TRASH_DIR_NAME, CACHE_DIR_NAME } = require('../utils/fileUtils');
-const previewService = require('../services/previewService'); // 引入预览图服务
+const { safeJoin, TRASH_DIR_NAME, CACHE_DIR_NAME, sanitizeFilename } = require('../utils/fileUtils');
+const { setAlbumPassword, verifyAlbumPassword } = require('../utils/albumUtils');
+const { formatImageResponse } = require('../utils/urlUtils');
+const previewService = require('../services/previewService');
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
-
-async function getAlbumPasswordPath(dirPath) {
-    const absDir = safeJoin(STORAGE_PATH, dirPath);
-    return path.join(absDir, "config", "album_password.json");
-}
-
-async function verifyAlbumPassword(dirPath, password) {
-    try {
-        const configPath = await getAlbumPasswordPath(dirPath);
-        if (await fs.pathExists(configPath)) {
-            const data = await fs.readJson(configPath);
-            return data.password === password;
-        }
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
 
 // 0. 手动同步
 router.post('/sync', requirePassword, async (req, res) => {
@@ -46,18 +30,8 @@ router.post('/album/password', requirePassword, async (req, res) => {
         const { dir, password } = req.body;
         if (dir === undefined) return res.status(400).json({ error: "Missing directory" });
 
-        const configPath = await getAlbumPasswordPath(dir);
-
-        if (!password) {
-            if (await fs.pathExists(configPath)) {
-                await fs.remove(configPath);
-            }
-            return res.json({ success: true, message: "密码已移除" });
-        }
-
-        await fs.ensureDir(path.dirname(configPath));
-        await fs.writeJSON(configPath, { password });
-        res.json({ success: true, message: "密码设置成功" });
+        await setAlbumPassword(dir, password || null);
+        res.json({ success: true, message: password ? "密码设置成功" : "密码已移除" });
     } catch (e) {
         console.error("Set album password error:", e);
         res.status(500).json({ error: "设置密码失败" });
@@ -294,6 +268,85 @@ router.post('/directories', requirePassword, async (req, res) => {
     } catch (e) {
         console.error("Create directory failed:", e);
         res.status(500).json({ error: "创建目录失败" });
+    }
+});
+
+// 7. 重命名/移动图片
+router.put('/images/*', requirePassword, async (req, res) => {
+    const relPath = decodeURIComponent(req.params[0]);
+    try {
+        const { newName, newDir } = req.body;
+        if (!newName && newDir === undefined) {
+            return res.status(400).json({ success: false, error: "缺少 newName 或 newDir 参数" });
+        }
+
+        const oldFilePath = safeJoin(STORAGE_PATH, relPath);
+        if (!await fs.pathExists(oldFilePath)) {
+            return res.status(404).json({ success: false, error: "图片不存在" });
+        }
+
+        const oldDir = path.dirname(relPath).replace(/\\/g, '/');
+        const oldFilename = path.basename(relPath);
+        const targetDir = newDir !== undefined ? newDir.replace(/\\/g, '/') : oldDir;
+        const targetFilename = newName ? sanitizeFilename(newName) : oldFilename;
+        let newRelPath = (targetDir ? targetDir + '/' : '') + targetFilename;
+
+        // 防止同位置同名
+        if (newRelPath === relPath) {
+            return res.json({ success: true, data: formatImageResponse(req, imageRepository.getByPath(relPath)) });
+        }
+
+        const absTargetDir = safeJoin(STORAGE_PATH, targetDir);
+        await fs.ensureDir(absTargetDir);
+
+        let newFilePath = safeJoin(STORAGE_PATH, newRelPath);
+
+        // 重复检查
+        if (await fs.pathExists(newFilePath)) {
+            let counter = 1;
+            const ext = path.extname(targetFilename);
+            const nameBase = path.basename(targetFilename, ext);
+            while (await fs.pathExists(newFilePath)) {
+                const candidate = `${nameBase}_${counter}${ext}`;
+                newRelPath = (targetDir ? targetDir + '/' : '') + candidate;
+                newFilePath = safeJoin(STORAGE_PATH, newRelPath);
+                counter++;
+            }
+        }
+
+        await fs.move(oldFilePath, newFilePath);
+
+        // 移动 thumbhash
+        const oldCachePath = path.join(path.dirname(oldFilePath), CACHE_DIR_NAME, `${oldFilename}.th`);
+        if (await fs.pathExists(oldCachePath)) {
+            const newCacheDir = path.join(path.dirname(newFilePath), CACHE_DIR_NAME);
+            await fs.ensureDir(newCacheDir);
+            await fs.move(oldCachePath, path.join(newCacheDir, `${path.basename(newFilePath)}.th`));
+        }
+
+        // 移动预览图
+        const oldPreviewPath = await previewService.getPreviewPath(relPath);
+        if (oldPreviewPath && await fs.pathExists(oldPreviewPath)) {
+            const newPreviewDir = path.join(path.dirname(newFilePath), previewService.PREVIEW_DIR_NAME);
+            await fs.ensureDir(newPreviewDir);
+            const newPreviewFilename = path.parse(path.basename(newFilePath)).name + '.webp';
+            await fs.move(oldPreviewPath, path.join(newPreviewDir, newPreviewFilename));
+        }
+
+        // 更新 DB
+        const dbImage = imageRepository.getByPath(relPath);
+        if (dbImage) {
+            imageRepository.delete(relPath);
+            dbImage.rel_path = newRelPath;
+            dbImage.filename = path.basename(newFilePath);
+            imageRepository.add(dbImage);
+        }
+
+        const updated = imageRepository.getByPath(newRelPath);
+        res.json({ success: true, data: formatImageResponse(req, updated || { rel_path: newRelPath, filename: path.basename(newFilePath) }) });
+    } catch (e) {
+        console.error("Rename/move error:", e);
+        res.status(500).json({ success: false, error: "重命名/移动失败" });
     }
 });
 

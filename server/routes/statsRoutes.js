@@ -6,7 +6,7 @@ const { requirePassword } = require('../middleware/auth');
 // 获取每日流量统计
 router.get('/traffic', requirePassword, async (req, res) => {
     try {
-        const days = req.query.days ? parseInt(req.query.days) : 30;
+        const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
         const stats = imageRepository.getDailyStats(days);
         // Ensure chronological order for charts (DB returns DESC)
         const sorted = stats.reverse();
@@ -20,7 +20,7 @@ router.get('/traffic', requirePassword, async (req, res) => {
 // 获取热门图片
 router.get('/top', requirePassword, async (req, res) => {
     try {
-        const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
         const topImages = imageRepository.getTopImages(limit);
 
         // Map to standard response format if needed, or just return DB rows

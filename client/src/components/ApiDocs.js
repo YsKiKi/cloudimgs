@@ -5,7 +5,6 @@ import {
   FolderOutlined,
   InfoCircleOutlined,
   CopyOutlined,
-  CodeOutlined,
   FileTextOutlined,
   LockOutlined
 } from '@ant-design/icons';
@@ -119,7 +118,7 @@ const ApiDocs = () => {
           云图提供了一系列 RESTful API，方便您进行图片的上传、管理与检索。
         </Paragraph>
         {savedPassword && (
-          <Tag color="success" icon={<CodeOutlined />}>
+          <Tag color="success" icon={<LockOutlined />}>
             已自动在 CURL 示例中包含您的访问密码
           </Tag>
         )}
@@ -172,7 +171,7 @@ const ApiDocs = () => {
           key="1"
           extra={<FileImageOutlined />}
         >
-          <Card type="inner" title="📖 接口说明：预览图 / 原图 / 兼容路由" bordered={false} style={{ background: token.colorInfoBg, marginBottom: 16 }}>
+          <Card type="inner" title="📖 接口说明：预览图 / 原图 / 文件直出" bordered={false} style={{ background: token.colorInfoBg, marginBottom: 16 }}>
             <Paragraph>
               <Text strong>系统为每种访问场景提供独立接口，以优化性能和带宽：</Text>
             </Paragraph>
@@ -186,16 +185,12 @@ const ApiDocs = () => {
                 <br />始终返回 <Text strong>原始图片</Text>（无附加参数）或按参数实时处理后的图片（有 w/h/q/fmt 等参数）
               </li>
               <li>
-                <Text code>/api/images/:path</Text> - <Tag color="default">兼容路由</Tag>
-                <br />向后兼容：<Text strong>无处理参数</Text>时等同于 preview，<Text strong>有处理参数</Text>时等同于 raw
-              </li>
-              <li>
                 <Text code>/api/files/:path</Text> - <Tag color="volcano">文件直出（无处理）</Tag>
                 <br />直接发送原始文件，不记录统计；适合直链下载
               </li>
             </ul>
             <Paragraph type="secondary" style={{ marginTop: 12 }}>
-              💡 提示：预览图自动生成并缓存于 <Text code>.preview</Text> 子目录；API 响应中的 <Text code>previewUrl</Text> / <Text code>rawUrl</Text> 字段已包含对应直链
+              💡 提示：预览图自动生成并缓存于 <Text code>.preview</Text> 子目录；API 响应中的 <Text code>previewUrl</Text> / <Text code>rawUrl</Text> / <Text code>fileUrl</Text> 字段已包含对应直链
             </Paragraph>
           </Card>
 
@@ -266,20 +261,6 @@ const ApiDocs = () => {
               <li><Text code>/api/images/raw/photo.jpg?w=800&fmt=webp</Text> — 返回 800px WebP</li>
               <li><Text code>/api/images/raw/photo.jpg?rows=3&cols=3&idx=0</Text> — 返回网格切分第 0 块</li>
             </ul>
-          </Card>
-
-          <Divider />
-
-          <Card type="inner" title="获取指定图片 — 兼容路由" bordered={false}>
-            <div style={endpointStyle}>
-              <Tag color="default" style={methodTagStyle('GET')}>GET</Tag>
-              <Text code copyable>/api/images/:path</Text>
-              <CurlButton endpoint="/api/images/photos/sunset.jpg" method="GET" />
-            </div>
-            <Paragraph>
-              向后兼容路由：<Text strong>无处理参数</Text>时等同于 <Text code>/api/images/preview/:path</Text>；
-              <Text strong>有处理参数（w/h/q/fmt 等）</Text>时等同于 <Text code>/api/images/raw/:path</Text>。
-            </Paragraph>
           </Card>
 
           <Divider />
@@ -369,19 +350,6 @@ const ApiDocs = () => {
               <li><Text code>/api/random/raw?w=800&fmt=jpeg</Text> — 随机图片处理为 800px JPEG</li>
               <li><Text code>/api/random/raw?format=json</Text> — 随机图片元数据 JSON</li>
             </ul>
-          </Card>
-
-          <Divider />
-
-          <Card type="inner" title="获取随机图片 — 兼容路由" bordered={false}>
-            <div style={endpointStyle}>
-              <Tag color="default" style={methodTagStyle('GET')}>GET</Tag>
-              <Text code copyable>/api/random</Text>
-              <CurlButton endpoint="/api/random?format=json" method="GET" />
-            </div>
-            <Paragraph>
-              向后兼容路由：<Text strong>无处理参数</Text>时等同于 <Text code>/api/random/preview</Text>；<Text strong>有处理参数</Text>时等同于 <Text code>/api/random/raw</Text>。
-            </Paragraph>
           </Card>
 
           <Divider />
@@ -488,8 +456,8 @@ const ApiDocs = () => {
           <Card type="inner" title="获取目录列表" bordered={false}>
             <div style={endpointStyle}>
               <Tag color="blue" style={methodTagStyle('GET')}>GET</Tag>
-              <Text code copyable>/api/dirs</Text>
-              <CurlButton endpoint="/api/dirs" method="GET" />
+              <Text code copyable>/api/directories</Text>
+              <CurlButton endpoint="/api/directories" method="GET" />
             </div>
             <Paragraph>
               获取当前所有的图片目录结构。
@@ -563,68 +531,10 @@ const ApiDocs = () => {
             </Paragraph>
           </Card>
         </Panel>
-        <Panel
-          header={<div style={{ fontWeight: 600, fontSize: 16 }}>工具接口 (Tools)</div>}
-          key="5"
-          extra={<CodeOutlined />}
-        >
-          <Card type="inner" title="图片处理" bordered={false}>
-            <div style={endpointStyle}>
-              <Tag color="green" style={methodTagStyle('POST')}>POST</Tag>
-              <Text code copyable>/api/process-image</Text>
-              <CurlButton
-                endpoint="/api/process-image"
-                method="POST"
-                options={{
-                  isMultipart: true,
-                  extraParams: [
-                    { key: 'width', value: '300' },
-                    { key: 'height', value: '300' },
-                    { key: 'dir', value: 'processed' }
-                  ]
-                }}
-              />
-            </div>
-            <Paragraph>
-              上传并调整图片尺寸（保持纵横比缩放至目标尺寸）。
-            </Paragraph>
-            <Divider orientation="left" plain>Body (FormData)</Divider>
-            <ul>
-              <li><Text code>image</Text>: 图片文件</li>
-              <li><Text code>width</Text>: 目标宽度</li>
-              <li><Text code>height</Text>: 目标高度</li>
-              <li><Text code>dir</Text>: 存储目录 (可选)</li>
-            </ul>
-          </Card>
-
-          <Divider />
-
-          <Card type="inner" title="SVG 转 PNG" bordered={false}>
-            <div style={endpointStyle}>
-              <Tag color="green" style={methodTagStyle('POST')}>POST</Tag>
-              <Text code copyable>/api/svg2png</Text>
-              <CurlButton
-                endpoint="/api/svg2png"
-                method="POST"
-                options={{
-                  isJson: true,
-                  body: { svgCode: "<svg>...</svg>" }
-                }}
-              />
-            </div>
-            <Paragraph>
-              将 SVG 代码转换为 PNG 图片流。
-            </Paragraph>
-            <Divider orientation="left" plain>Body (JSON)</Divider>
-            <ul>
-              <li><Text code>svgCode</Text>: SVG 源代码字符串</li>
-            </ul>
-          </Card>
-        </Panel>
       </Collapse>
 
       <div style={{ marginTop: 40, textAlign: 'center', color: token.colorTextSecondary }}>
-        <Text type="secondary">© 2025 Cloud Gallery API. All rights reserved.</Text>
+        <Text type="secondary">© 2026 Cloud Gallery API. All rights reserved.</Text>
       </div>
     </div>
   );

@@ -223,12 +223,7 @@ const AlbumManager = ({ visible, onClose, api, onSelectAlbum }) => {
 
   const handleDeleteShare = async (signature) => {
     try {
-      const res = await api.delete("/share/delete", {
-        data: {
-          path: currentAlbum.path,
-          signature
-        }
-      });
+      const res = await api.delete(`/share/${encodeURIComponent(signature)}`);
       if (res.data.success) {
         message.success("删除成功");
         fetchShareList(currentAlbum.path);

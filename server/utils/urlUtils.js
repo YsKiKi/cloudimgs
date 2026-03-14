@@ -11,10 +11,9 @@ function formatImageResponse(req, image) {
     if (!image || !image.rel_path) return image;
 
     const relPathStr = image.rel_path.split("/").map(encodeURIComponent).join("/");
-    const url        = `/api/images/${relPathStr}`;            // 向后兼容（智能：无参数=预览，有参数=原图）
-    const previewUrl = `/api/images/preview/${relPathStr}`;    // 专用预览图接口（WebP 优化）
-    const rawUrl     = `/api/images/raw/${relPathStr}`;        // 专用原图接口
-    const fullUrl        = `${req.protocol}://${req.get('host')}${url}`;
+    const previewUrl = `/api/images/preview/${relPathStr}`;    // 预览图接口（WebP 优化）
+    const rawUrl     = `/api/images/raw/${relPathStr}`;        // 原图接口（支持处理参数）
+    const fileUrl    = `/api/files/${relPathStr}`;             // 文件直出接口（无处理，用于下载）
     const fullPreviewUrl = `${req.protocol}://${req.get('host')}${previewUrl}`;
     const fullRawUrl     = `${req.protocol}://${req.get('host')}${rawUrl}`;
 
@@ -32,10 +31,11 @@ function formatImageResponse(req, image) {
         // Standard fields
         filename: image.filename,
         relPath: image.rel_path,
-        fullUrl: fullUrl,           // 绝对 URL（向后兼容，智能路由）
-        url: url,                   // 相对 URL（向后兼容，智能路由）
+        url: previewUrl,            // 默认 URL（预览图）
+        fullUrl: fullPreviewUrl,    // 默认绝对 URL（预览图）
         previewUrl: previewUrl,     // 预览图相对 URL（WebP 优化）
         rawUrl: rawUrl,             // 原图相对 URL
+        fileUrl: fileUrl,           // 文件直出相对 URL（无处理，用于下载）
         fullPreviewUrl: fullPreviewUrl, // 预览图绝对 URL
         fullRawUrl: fullRawUrl,     // 原图绝对 URL
         width: image.width,

@@ -1,10 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs-extra");
-const config = require("../config"); // config.js is in root usually? checking old index.js: require("../config")
-// 等等，index.js 在 server/ 中，所以 ../config 在根目录。正确。
+const config = require("../config");
 
 const uploadRoutes = require("./routes/uploadRoutes");
 const imageRoutes = require("./routes/imageRoutes");
@@ -20,8 +20,35 @@ const app = express();
 const PORT = config.server.port || 5000; // fallback
 
 // 中间件
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || true, // 设置 CORS_ORIGIN 环境变量限定来源
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-Access-Password', 'X-Album-Password'],
+};
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+
+// 登录接口速率限制 — 防暴力破解
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "请求过于频繁，请稍后再试" },
+});
+app.use('/api/auth/login', loginLimiter);
+
+// 上传接口速率限制
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "上传过于频繁，请稍后再试" },
+});
+app.use('/api/upload', uploadLimiter);
+app.use('/api/upload-base64', uploadLimiter);
+app.use('/api/upload-file', uploadLimiter);
 
 // 静态文件服务 - 设置合适的缓存策略
 app.use(express.static(path.join(__dirname, "../client/build"), {
@@ -46,7 +73,7 @@ app.use(express.static(path.join(__dirname, "../client/build"), {
   }
 }));
 
-app.enable("trust proxy");
+app.set("trust proxy", process.env.TRUST_PROXY || "loopback");
 
 // 路由
 // 顺序很重要！
@@ -135,6 +162,15 @@ app.get('*', (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, "../client/build", "index.html"));
+});
+
+// 全局错误处理（捕获非 UTF-8 编码 URL 导致的 URIError 等）
+app.use((err, req, res, _next) => {
+  if (err instanceof URIError) {
+    return res.status(400).json({ error: "Invalid URL encoding" });
+  }
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal server error" });
 });
 
 // 启动服务器

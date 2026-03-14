@@ -96,11 +96,11 @@ const ImageItem = ({
 
   // Build image src with optional cache-busting on retry
   const getImageSrc = useCallback(() => {
-    const base = thumbnailWidth > 0 ? `${image.url}?w=${thumbnailWidth}` : image.url;
+    const base = thumbnailWidth > 0 ? `${image.rawUrl || image.url}?w=${thumbnailWidth}` : image.url;
     if (retryCount === 0) return base;
     const sep = base.includes('?') ? '&' : '?';
     return `${base}${sep}_r=${retryCount}`;
-  }, [image.url, thumbnailWidth, retryCount]);
+  }, [image.url, image.rawUrl, thumbnailWidth, retryCount]);
 
   // Fallback: if image stays unloaded for too long, force reveal
   useEffect(() => {
@@ -235,7 +235,7 @@ const ImageItem = ({
             return (
               <video
                 ref={videoRef}
-                src={image.url}
+                src={image.fileUrl || image.url}
                 muted
                 loop
                 playsInline
@@ -701,7 +701,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const generateImageLinks = (image, type) => {
     if (!image) return "";
-    const fullUrl = `${window.location.origin}${image.url}`;
+    const fullUrl = `${window.location.origin}${image.rawUrl || image.url}`;
     switch (type) {
       case "markdown":
         return `![${image.filename}](${fullUrl})`;
@@ -1348,7 +1348,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   // Helper for Upload Result
   const generateLinks = (type) => {
     return sessionUploadedFiles.map(file => {
-      const fullUrl = `${window.location.origin}${file.url}`;
+      const fullUrl = `${window.location.origin}${file.rawUrl || file.url}`;
       switch (type) {
         case 'markdown':
           return `![${file.originalName}](${fullUrl})`;
@@ -1700,8 +1700,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const handleDownload = (file) => {
     const link = document.createElement("a");
-    // 使用 /api/files/ 端点下载原图，而不是 /api/images/ 的预览图
-    const downloadUrl = file.url.replace('/api/images/', '/api/files/');
+    // 使用 /api/files/ 端点下载原图
+    const downloadUrl = file.fileUrl || `/api/files/${encodePath(file.relPath)}`;
     link.href = downloadUrl;
     link.download = file.filename;
     document.body.appendChild(link);

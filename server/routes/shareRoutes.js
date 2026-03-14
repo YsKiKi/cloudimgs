@@ -77,15 +77,13 @@ router.post('/revoke', requirePassword, (req, res) => {
     }
 });
 
-// Delete Share Link (History)
-router.delete('/delete', requirePassword, (req, res) => {
+// Delete Share Link
+// DELETE /api/share/:token
+router.delete('/:token', requirePassword, (req, res) => {
     try {
-        const { signature } = req.body; // or req.body.data if axios sends it there? Express req.body handles it if JSON middleware is on.
-        // Wait, DELETE with body? Client sends `data: { ... }`. Express `req.body` should have it.
-
-        if (!signature) return res.status(400).json({ error: "Missing signature" });
-
-        shareRepository.delete(signature);
+        const token = req.params.token;
+        if (!token) return res.status(400).json({ error: "Missing token" });
+        shareRepository.delete(token);
         res.json({ success: true });
     } catch (e) {
         console.error("Delete share error:", e);
@@ -115,23 +113,23 @@ router.get('/access', (req, res) => {
             return res.status(403).json({ error: "Link already used (Burned)" });
         }
 
-        // Increment view count
-        shareRepository.incrementView(token);
-
         // Get images
         let images = imageRepository.getByDir(share.path);
 
-        // Pagination
-        const p = parseInt(page);
-        const ps = parseInt(pageSize);
+        // Pagination with validation
+        const p = Math.max(1, parseInt(page) || 1);
+        const ps = Math.min(200, Math.max(1, parseInt(pageSize) || 20));
         const total = images.length;
         const totalPages = Math.ceil(total / ps);
         const start = (p - 1) * ps;
         const end = start + ps;
-        const sliced = images.slice(start, end); // Basic memory pagination. For huge sets, DB limit/offset is better but we use `LIKE` which is tricky for deep pagination without more logic.
+        const sliced = images.slice(start, end);
 
         // Get dirname
         const dirName = share.path.split('/').pop() || (share.path === "" ? "全部图片" : share.path);
+
+        // Increment view count AFTER successful data retrieval
+        shareRepository.incrementView(token);
 
         res.json({
             success: true,

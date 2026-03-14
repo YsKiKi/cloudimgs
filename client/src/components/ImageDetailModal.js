@@ -266,8 +266,8 @@ const ImageDetailModal = ({
 
   const handleDownload = () => {
     const link = document.createElement("a");
-    // 使用 /api/files/ 端点下载原图，而不是 /api/images/ 的预览图
-    const downloadUrl = file.url.replace('/api/images/', '/api/files/');
+    // 使用 /api/files/ 端点下载原图
+    const downloadUrl = file.fileUrl || `/api/files/${file.relPath.split('/').map(encodeURIComponent).join('/')}`;
     link.href = downloadUrl;
     link.download = file.filename;
     document.body.appendChild(link);
@@ -564,7 +564,7 @@ const ImageDetailModal = ({
                   zIndex: 2,
                   outline: "none",
                 }}
-                src={file.url}
+                src={file.fileUrl || file.url}
               />
             ) : (
               <>

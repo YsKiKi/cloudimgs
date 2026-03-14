@@ -20,6 +20,16 @@ const getImagesByDir = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? ||
 const getPreviewsQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY upload_time DESC LIMIT ?");
 const countImagesByDirQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%'");
 
+// 分页查询 — DB 层面高效分页
+const paginateAllQuery = db.prepare('SELECT * FROM images ORDER BY upload_time DESC LIMIT ? OFFSET ?');
+const paginateByDirQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
+const countByDirSearchQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%' AND filename LIKE '%' || ? || '%'");
+const paginateByDirSearchQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' AND filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
+const countAllSearchQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE filename LIKE '%' || ? || '%'");
+const paginateAllSearchQuery = db.prepare("SELECT * FROM images WHERE filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
+const getRandomByDirQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY RANDOM() LIMIT 1");
+const getRandomAllQuery = db.prepare("SELECT * FROM images ORDER BY RANDOM() LIMIT 1");
+
 // 批量操作
 const insertMany = db.transaction((images) => {
     for (const img of images) insertImage.run(img);
@@ -53,9 +63,7 @@ module.exports = {
             return insertImage.run(image);
         } catch (e) {
             if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-                // 如果已存在，尝试更新
-                // 目前仅记录日志或重新抛出，或者可以使用 INSERT OR REPLACE
-                console.warn(`Image ${image.relPath} already exists in DB. Attempting update.`);
+                console.warn(`Image ${image.rel_path || image.relPath} already exists in DB. Attempting update.`);
                 return updateImage.run(image);
             }
             throw e;
@@ -67,18 +75,41 @@ module.exports = {
     delete: (relPath) => deleteImageByPath.run(relPath),
     count: () => countImages.get().count,
     getByDir: (dir) => {
-        // 处理根目录特殊情况，通常 dir 为空字符串表示根
-        // 如果 dir 为空，返回所有？还是仅根目录项？
-        // getAllImagesQuery 返回所有
-        // 如果提供了 dir，使用 LIKE 匹配
         if (!dir) return getAllImagesQuery.all();
         return getImagesByDir.all(dir);
     },
     getPreviews: (dir, limit = 3) => getPreviewsQuery.all(dir, limit),
     countByDir: (dir) => countImagesByDirQuery.get(dir).count,
     insertMany,
-    // 事务辅助函数
     transaction: (fn) => db.transaction(fn),
+
+    // 高效分页查询
+    paginate: (dir, search, page, pageSize) => {
+        const offset = (page - 1) * pageSize;
+        if (dir && search) {
+            const total = countByDirSearchQuery.get(dir, search).count;
+            const data = paginateByDirSearchQuery.all(dir, search, pageSize, offset);
+            return { data, total };
+        } else if (dir) {
+            const total = countImagesByDirQuery.get(dir).count;
+            const data = paginateByDirQuery.all(dir, pageSize, offset);
+            return { data, total };
+        } else if (search) {
+            const total = countAllSearchQuery.get(search).count;
+            const data = paginateAllSearchQuery.all(search, pageSize, offset);
+            return { data, total };
+        } else {
+            const total = countImages.get().count;
+            const data = paginateAllQuery.all(pageSize, offset);
+            return { data, total };
+        }
+    },
+
+    // 随机图片（DB 层）
+    getRandom: (dir) => {
+        if (dir) return getRandomByDirQuery.get(dir);
+        return getRandomAllQuery.get();
+    },
 
     // Stats Methods
     incrementViews: (relPath) => incrementViewQuery.run({ relPath, now: Date.now() }),

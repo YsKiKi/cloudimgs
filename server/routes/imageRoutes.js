@@ -6,49 +6,23 @@ const sharp = require('sharp');
 const config = require('../../config');
 const imageRepository = require('../db/imageRepository');
 const { requirePassword } = require('../middleware/auth');
-const { safeJoin, getThumbHash, generateThumbHash } = require('../utils/fileUtils');
+const { safeJoin, getThumbHash, generateThumbHash, CACHE_DIR_NAME, TRASH_DIR_NAME, CONFIG_DIR_NAME } = require('../utils/fileUtils');
+const { verifyAlbumPassword, isAlbumLocked } = require('../utils/albumUtils');
 const { formatImageResponse } = require('../utils/urlUtils');
-const previewService = require('../services/previewService'); // 引入预览图服务
+const previewService = require('../services/previewService');
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
 
-// 原始代码中的辅助函数
-async function getAlbumPasswordPath(dirPath) {
-    const absDir = safeJoin(STORAGE_PATH, dirPath);
-    return path.join(absDir, "config", "album_password.json");
+// 禁止访问内部目录
+const SENSITIVE_SEGMENTS = ['.cache', '.trash', '.preview', 'config'];
+function isSensitivePath(relPath) {
+    const segments = relPath.replace(/\\/g, '/').split('/');
+    return segments.some(s => SENSITIVE_SEGMENTS.includes(s));
 }
 
-async function verifyAlbumPassword(dirPath, password) {
-    try {
-        const configPath = await getAlbumPasswordPath(dirPath);
-        if (await fs.pathExists(configPath)) {
-            const data = await fs.readJson(configPath);
-            return data.password === password;
-        }
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
-
-async function isAlbumLocked(dirPath) {
-    try {
-        const configPath = await getAlbumPasswordPath(dirPath);
-        if (await fs.pathExists(configPath)) {
-            const data = await fs.readJson(configPath);
-            return !!data.password;
-        }
-    } catch (e) { }
-    return false;
-}
-
-// 地图数据 (旧端点支持，现在仅返回 DB 中的所有图像？)
-// 原始 updateMapCache 返回所有图像。
+// 地图数据 — 返回所有带 GPS 数据的图像
 router.get('/map-data', requirePassword, async (req, res) => {
-    // 返回所有带 GPS 数据的图像
-    // 我们可以在 SQL 或 JS 中过滤。
-    // 目前获取所有并返回所需字段。
     const images = imageRepository.getAll();
     const mapData = images.filter(img => {
         const meta = JSON.parse(img.meta_json || '{}');
@@ -74,7 +48,7 @@ router.get('/map-data', requirePassword, async (req, res) => {
 // 目录列表
 router.get('/directories', requirePassword, async (req, res) => {
     try {
-        const { CACHE_DIR_NAME, CONFIG_DIR_NAME, TRASH_DIR_NAME } = require('../utils/fileUtils');
+        const { CACHE_DIR_NAME: CD, CONFIG_DIR_NAME: CFD, TRASH_DIR_NAME: TD } = require('../utils/fileUtils');
 
         // 扫描目录
         async function getDirectories(dir) {
@@ -83,7 +57,7 @@ router.get('/directories', requirePassword, async (req, res) => {
             try {
                 const files = await fs.readdir(absDir);
                 for (const file of files) {
-                    if (file === CACHE_DIR_NAME || file === CONFIG_DIR_NAME || file === TRASH_DIR_NAME) continue;
+                    if (file === CD || file === CFD || file === TD) continue;
                     if (file.startsWith('.')) continue; // 跳过隐藏文件
 
                     const filePath = path.join(absDir, file);
@@ -145,8 +119,8 @@ router.get('/images', requirePassword, async (req, res) => {
     try {
         let dir = req.query.dir || "";
         dir = dir.replace(/\\/g, "/");
-        const page = parseInt(req.query.page) || 1;
-        const pageSize = parseInt(req.query.pageSize) || 10;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize) || 10));
         const search = req.query.search || "";
 
         const albumPassword = req.headers["x-album-password"];
@@ -156,31 +130,8 @@ router.get('/images', requirePassword, async (req, res) => {
             }
         }
 
-        // DB 查询？
-        // SQLite 没有原生的递归目录过滤，除非我们使用 GLOB
-        // 但 `rel_path` 允许 `dir/*` 通配符？
-        // 或者我们可以获取全部并在内存中过滤？
-        // `imageRepository.getAll` 返回所有。
-        // 如果库很大（10万张图片），内存过滤很糟糕。
-        // 我应该使用 LIKE 'dir/%' AND NOT LIKE 'dir/%/%' 向存储库添加 `getByDir`？
-        // 原来的 `getAllImages` 是递归的！
-        // `getAllImages(dir)` 递归返回 `dir` 中的所有内容。
-        // 所以 `WHERE rel_path LIKE 'dir/%'` 是正确的（对根目录处理正确）。
-
-        let allImages = imageRepository.getAll();
-
-        if (dir) {
-            allImages = allImages.filter(img => img.rel_path.startsWith(dir !== "" ? (dir + "/") : ""));
-        }
-
-        if (search) {
-            allImages = allImages.filter(img => img.filename.toLowerCase().includes(search.toLowerCase()));
-        }
-
-        const total = allImages.length;
-        const startIndex = (page - 1) * pageSize;
-        const paginated = allImages.slice(startIndex, startIndex + pageSize);
-
+        // 使用 DB 层分页查询
+        const { data: paginated, total } = imageRepository.paginate(dir, search, page, pageSize);
         const result = paginated.map(img => formatImageResponse(req, img));
 
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -333,6 +284,7 @@ async function applySharp(filePath, query) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function servePreviewImage(req, res, relPath) {
     try {
+        if (isSensitivePath(relPath)) return res.status(403).json({ error: "Access denied" });
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (!await fs.pathExists(filePath)) return res.status(404).json({ error: "Not found" });
 
@@ -383,6 +335,7 @@ async function servePreviewImage(req, res, relPath) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function serveRawImage(req, res, relPath) {
     try {
+        if (isSensitivePath(relPath)) return res.status(403).json({ error: "Access denied" });
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (!await fs.pathExists(filePath)) return res.status(404).json({ error: "Not found" });
 
@@ -394,7 +347,13 @@ async function serveRawImage(req, res, relPath) {
         if (!hasProcessingParams) {
             const stats = await fs.stat(filePath).catch(() => ({ size: 0 }));
             try { imageRepository.recordView(stats.size); imageRepository.incrementViews(relPath); } catch (e) { console.error("Stats error", e); }
-            res.setHeader("Content-Type", mime.lookup(filePath) || 'application/octet-stream');
+            const contentType = mime.lookup(filePath) || 'application/octet-stream';
+            res.setHeader("Content-Type", contentType);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            // SVG 安全防护
+            if (contentType === 'image/svg+xml') {
+                res.setHeader('Content-Security-Policy', "script-src 'none'");
+            }
             res.setHeader("Cache-Control", "public, max-age=86400");
             return res.sendFile(filePath);
         }
@@ -426,18 +385,7 @@ async function serveRawImage(req, res, relPath) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 辅助函数：智能发图（向后兼容——无处理参数用预览图，有参数用原图处理）
-// ─────────────────────────────────────────────────────────────────────────────
-async function serveImage(req, res, relPath) {
-    const { w, h, q, fmt, rows, cols, idx } = req.query;
-    const hasProcessingParams = w || h || q || fmt || rows || cols || idx !== undefined;
-    if (hasProcessingParams) {
-        return serveRawImage(req, res, relPath);
-    } else {
-        return servePreviewImage(req, res, relPath);
-    }
-}
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 路由定义
@@ -447,13 +395,11 @@ async function serveImage(req, res, relPath) {
 
 // 随机图片 — 预览图（WebP 优化）
 // GET /api/random/preview?dir=xxx&format=json
-router.get('/random/preview', async (req, res) => {
+router.get('/random/preview', requirePassword, async (req, res) => {
     try {
         let dir = (req.query.dir || "").replace(/\\/g, "/");
-        let allImages = imageRepository.getAll();
-        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
-        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
-        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
+        const randomImage = imageRepository.getRandom(dir || null);
+        if (!randomImage) return res.status(404).json({ error: "Not Found" });
         if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
         await servePreviewImage(req, res, randomImage.rel_path);
     } catch (e) {
@@ -464,34 +410,15 @@ router.get('/random/preview', async (req, res) => {
 
 // 随机图片 — 原图（支持处理参数或 format=json）
 // GET /api/random/raw?dir=xxx&w=800&fmt=webp&format=json
-router.get('/random/raw', async (req, res) => {
+router.get('/random/raw', requirePassword, async (req, res) => {
     try {
         let dir = (req.query.dir || "").replace(/\\/g, "/");
-        let allImages = imageRepository.getAll();
-        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
-        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
-        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
+        const randomImage = imageRepository.getRandom(dir || null);
+        if (!randomImage) return res.status(404).json({ error: "Not Found" });
         if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
         await serveRawImage(req, res, randomImage.rel_path);
     } catch (e) {
         console.error("Random raw error:", e);
-        res.status(500).json({ error: "Failed to get random image" });
-    }
-});
-
-// 随机图片 — 向后兼容（无处理参数用预览图，有参数用原图处理）
-// GET /api/random?dir=xxx&format=json
-router.get('/random', async (req, res) => {
-    try {
-        let dir = (req.query.dir || "").replace(/\\/g, "/");
-        let allImages = imageRepository.getAll();
-        if (dir) allImages = allImages.filter(img => img.rel_path.startsWith(dir ? (dir + "/") : ""));
-        if (allImages.length === 0) return res.status(404).json({ error: "Not Found" });
-        const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
-        if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
-        await serveImage(req, res, randomImage.rel_path);
-    } catch (e) {
-        console.error("Random image error:", e);
         res.status(500).json({ error: "Failed to get random image" });
     }
 });
@@ -512,20 +439,24 @@ router.get('/images/raw/*', async (req, res) => {
     await serveRawImage(req, res, relPath);
 });
 
-// 指定图片 — 向后兼容（无处理参数用预览图，有参数用原图处理）
-// GET /api/images/:path
-router.get('/images/*', async (req, res) => {
-    const relPath = decodeURIComponent(req.params[0]);
-    await serveImage(req, res, relPath);
-});
-
 // 原始文件直出（无任何处理，用于下载）
 // GET /api/files/:path
-router.get('/files/*', (req, res) => {
+router.get('/files/*', requirePassword, (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     try {
+        if (isSensitivePath(relPath)) {
+            return res.status(403).json({ error: "Access denied" });
+        }
         const filePath = safeJoin(STORAGE_PATH, relPath);
         if (fs.existsSync(filePath)) {
+            const contentType = mime.lookup(filePath) || 'application/octet-stream';
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            // SVG 安全防护：强制下载，禁止内联执行
+            if (contentType === 'image/svg+xml') {
+                res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+                res.setHeader('Content-Security-Policy', "script-src 'none'");
+            }
+            res.setHeader('Content-Type', contentType);
             res.sendFile(filePath);
         } else {
             res.status(404).json({ error: "Not found" });

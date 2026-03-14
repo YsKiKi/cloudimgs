@@ -193,7 +193,7 @@ function MapPage() {
     // Use existing URL if it's absolute (Mock mode), otherwise construct API URL
     url: marker.url && (marker.url.startsWith('http') || marker.url.startsWith('blob'))
       ? marker.url
-      : `/api/images/${marker.relPath.split('/').map(encodeURIComponent).join('/')}`,
+      : `/api/images/preview/${marker.relPath.split('/').map(encodeURIComponent).join('/')}`,
     uploadTime: marker.date || marker.uploadTime,
     size: marker.size || 0
   } : null;

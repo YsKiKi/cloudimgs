@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const clipService = require('../services/clipService');
+const { requirePassword } = require('../middleware/auth');
 const { formatImageResponse } = require('../utils/urlUtils');
 
 // 语义搜索
-router.post('/semantic', async (req, res) => {
+router.post('/semantic', requirePassword, async (req, res) => {
     try {
         const { query, limit } = req.body;
         if (!query) return res.status(400).json({ success: false, error: "Query is required" });
@@ -28,7 +29,7 @@ router.post('/semantic', async (req, res) => {
 });
 
 // 触发全量扫描
-router.post('/scan', async (req, res) => {
+router.post('/scan', requirePassword, async (req, res) => {
     try {
         const result = await clipService.scanAll();
         res.json({ success: true, ...result });
@@ -38,7 +39,7 @@ router.post('/scan', async (req, res) => {
 });
 
 // 重新索引所有图片 (清除 DB 并重新扫描)
-router.post('/reindex', async (req, res) => {
+router.post('/reindex', requirePassword, async (req, res) => {
     try {
         const result = await clipService.reindex();
         res.json({ success: true, ...result });
@@ -48,7 +49,7 @@ router.post('/reindex', async (req, res) => {
 });
 
 // 状态
-router.get('/status', (req, res) => {
+router.get('/status', requirePassword, (req, res) => {
     res.json({
         success: true,
         queueLength: clipService.queue.length,

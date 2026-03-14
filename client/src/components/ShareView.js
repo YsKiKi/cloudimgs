@@ -87,7 +87,7 @@ const ImageItem = ({ image, hoverKey, setHoverKey, handlePreview, isMobile, hand
                         return (
                             <video
                                 ref={videoRef}
-                                src={image.url}
+                                src={image.fileUrl || image.url}
                                 muted
                                 loop
                                 playsInline
@@ -380,8 +380,8 @@ const ShareView = ({ currentTheme, onThemeChange }) => {
 
     const handleDownload = (file) => {
         const link = document.createElement("a");
-        // 使用 /api/files/ 端点下载原图，而不是 /api/images/ 的预览图
-        const downloadUrl = file.url.replace('/api/images/', '/api/files/');
+        // 使用 /api/files/ 端点下载原图
+        const downloadUrl = file.fileUrl || `/api/files/${file.relPath.split('/').map(encodeURIComponent).join('/')}`;
         link.href = downloadUrl;
         link.download = file.filename;
         document.body.appendChild(link);
@@ -578,7 +578,7 @@ const ShareView = ({ currentTheme, onThemeChange }) => {
                             <div style={{ width: "100%", height: "100%", position: "relative", display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundImage: `url(${previewFile.url})`, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(40px) brightness(0.5)", transform: "scale(1.2)", zIndex: 0 }} />
                                 {/\.(mp4|webm)$/i.test(previewFile.filename) ? (
-                                    <ModalVideoPlayer url={previewFile.url} visible={previewVisible} />
+                                    <ModalVideoPlayer url={previewFile.fileUrl || previewFile.url} visible={previewVisible} />
                                 ) : (
                                     <>
                                         {!imgLoaded && (
