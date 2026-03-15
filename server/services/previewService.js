@@ -166,10 +166,49 @@ async function generatePreviewsForDirectory(dir = "") {
     }
 }
 
+/**
+ * 获取预览图的元数据（确保预览图存在后再读取）
+ * @param {string} originalPath - 原始图片的绝对路径
+ * @param {string} relPath - 图片的相对路径
+ * @returns {Promise<Object|null>} - 预览图的元数据 {width, height, size, format}
+ */
+async function getPreviewMetadata(originalPath, relPath) {
+    try {
+        // 获取或生成预览图
+        let previewPath = await getPreviewPath(relPath);
+        if (!previewPath || !await fs.pathExists(previewPath)) {
+            await generatePreview(originalPath, relPath);
+            previewPath = await getPreviewPath(relPath);
+        }
+
+        if (!previewPath || !await fs.pathExists(previewPath)) {
+            return null;
+        }
+
+        // 读取预览图元数据
+        const metadata = await sharp(previewPath).metadata();
+        const stats = await fs.stat(previewPath);
+
+        return {
+            width: metadata.width,
+            height: metadata.height,
+            size: stats.size,
+            format: metadata.format || 'webp',
+            space: metadata.space,
+            channels: metadata.channels,
+            hasAlpha: metadata.hasAlpha,
+        };
+    } catch (err) {
+        console.error(`Failed to get preview metadata for ${relPath}:`, err);
+        return null;
+    }
+}
+
 module.exports = {
     generatePreview,
     getPreviewPath,
     deletePreview,
     generatePreviewsForDirectory,
+    getPreviewMetadata,
     PREVIEW_DIR_NAME
 };

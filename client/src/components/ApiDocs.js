@@ -239,7 +239,7 @@ const ApiDocs = () => {
             <ul>
               <li>✅ 始终返回 WebP 格式（质量 80%，自动压缩）</li>
               <li>✅ 无预览缓存时同步生成（不再是异步，首次稍慢）</li>
-              <li>✅ 支持 <Text code>format=json</Text> 参数返回元数据 JSON</li>
+              <li>✅ 支持 <Text code>format=json</Text> 参数返回预览图的元数据（format: webp, size/width/height 为预览图实际值）</li>
               <li>✅ 长缓存（1 年）</li>
             </ul>
           </Card>
@@ -323,7 +323,7 @@ const ApiDocs = () => {
             <Divider orientation="left" plain>参数</Divider>
             <ul>
               <li><Text code>dir</Text>: 限定目录路径（可选）</li>
-              <li><Text code>format=json</Text>: 返回元数据 JSON（含 <Text code>previewUrl</Text> / <Text code>rawUrl</Text>）</li>
+              <li><Text code>format=json</Text>: 返回预览图的元数据 JSON（format: webp, size/width/height 为预览图实际值）</li>
             </ul>
             <Divider orientation="left" plain>示例</Divider>
             <ul>

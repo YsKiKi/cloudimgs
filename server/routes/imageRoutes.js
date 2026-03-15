@@ -400,7 +400,31 @@ router.get('/random/preview', requirePassword, async (req, res) => {
         let dir = (req.query.dir || "").replace(/\\/g, "/");
         const randomImage = imageRepository.getRandom(dir || null);
         if (!randomImage) return res.status(404).json({ error: "Not Found" });
-        if (req.query.format === 'json') return res.json(formatImageResponse(req, randomImage));
+        
+        if (req.query.format === 'json') {
+            const baseResponse = formatImageResponse(req, randomImage);
+            
+            // 获取预览图的实际元数据
+            const filePath = safeJoin(STORAGE_PATH, randomImage.rel_path);
+            const previewMeta = await previewService.getPreviewMetadata(filePath, randomImage.rel_path);
+            
+            if (previewMeta) {
+                // 使用预览图的元数据覆盖原图的元数据
+                return res.json({
+                    ...baseResponse,
+                    width: previewMeta.width,
+                    height: previewMeta.height,
+                    size: previewMeta.size,
+                    format: previewMeta.format,
+                    space: previewMeta.space,
+                    channels: previewMeta.channels,
+                    hasAlpha: previewMeta.hasAlpha,
+                });
+            }
+            
+            return res.json(baseResponse);
+        }
+        
         await servePreviewImage(req, res, randomImage.rel_path);
     } catch (e) {
         console.error("Random preview error:", e);
@@ -426,16 +450,53 @@ router.get('/random/raw', requirePassword, async (req, res) => {
 // ── 指定图片 ──────────────────────────────────────────────────────────────────
 
 // 指定图片 — 预览图（WebP 优化，同步生成）
-// GET /api/images/preview/:path
+// GET /api/images/preview/:path?format=json
 router.get('/images/preview/*', async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
+    
+    if (req.query.format === 'json') {
+        try {
+            const dbImage = imageRepository.getByPath(relPath);
+            if (!dbImage) return res.status(404).json({ error: "Not found" });
+            
+            const baseResponse = formatImageResponse(req, dbImage);
+            const filePath = safeJoin(STORAGE_PATH, relPath);
+            const previewMeta = await previewService.getPreviewMetadata(filePath, relPath);
+            
+            if (previewMeta) {
+                return res.json({
+                    ...baseResponse,
+                    width: previewMeta.width,
+                    height: previewMeta.height,
+                    size: previewMeta.size,
+                    format: previewMeta.format,
+                    space: previewMeta.space,
+                    channels: previewMeta.channels,
+                    hasAlpha: previewMeta.hasAlpha,
+                });
+            }
+            
+            return res.json(baseResponse);
+        } catch (e) {
+            console.error("Preview metadata error:", e);
+            return res.status(500).json({ error: "Failed to get preview metadata" });
+        }
+    }
+    
     await servePreviewImage(req, res, relPath);
 });
 
 // 指定图片 — 原图（支持 w/h/q/fmt/rows/cols/idx 处理参数）
-// GET /api/images/raw/:path?w=800&fmt=webp
+// GET /api/images/raw/:path?w=800&fmt=webp&format=json
 router.get('/images/raw/*', async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
+    
+    if (req.query.format === 'json') {
+        const dbImage = imageRepository.getByPath(relPath);
+        if (!dbImage) return res.status(404).json({ error: "Not found" });
+        return res.json(formatImageResponse(req, dbImage));
+    }
+    
     await serveRawImage(req, res, relPath);
 });
 
