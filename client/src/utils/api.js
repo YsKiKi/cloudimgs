@@ -19,9 +19,9 @@ const generateMockImages = () => {
       const width = Math.floor(Math.random() * (1600 - 1000) + 1000);
       const height = Math.floor(Math.random() * (1200 - 800) + 800);
       images.push({
-        relPath: `mock-image-${idCounter}.jpg`,
         filename: `Mock Image ${idCounter}.jpg`,
-        url: `https://picsum.photos/${width}/${height}?random=${idCounter}`,
+        previewUrl: `https://picsum.photos/${width}/${height}?random=${idCounter}`,
+        rawUrl: `https://picsum.photos/${width}/${height}?random=${idCounter}`,
         size: Math.floor(Math.random() * 5000000),
         uploadTime: baseTime - Math.floor(Math.random() * 1000000), // Slightly vary time within day
         thumbhash: null, // Optional
@@ -133,13 +133,13 @@ const mockAdapter = async (config) => {
       // Directories
       // Directories
       if (cleanUrl.split("?")[0] === "/directories" && method === "get") {
-        const previews = mockImages.slice(0, 3).map(img => img.url);
+        const previews = mockImages.slice(0, 3).map(img => img.previewUrl);
         resolve({
           data: {
             success: true,
             data: [
-              { name: "mock-dir-1", path: "mock-dir-1", fullUrl: "mock-dir-1", previews, imageCount: 10, mtime: new Date() },
-              { name: "mock-dir-2", path: "mock-dir-2", fullUrl: "mock-dir-2", previews, imageCount: 5, mtime: new Date() },
+              { name: "mock-dir-1", path: "mock-dir-1", previews, imageCount: 10, mtime: new Date() },
+              { name: "mock-dir-2", path: "mock-dir-2", previews, imageCount: 5, mtime: new Date() },
             ],
           },
           status: 200,
@@ -165,7 +165,7 @@ const mockAdapter = async (config) => {
       // Share Generate
       if (cleanUrl === "/share/generate" && method === "post") {
         resolve({
-          data: { success: true, token: "mock-token-" + Date.now() },
+          data: { success: true, data: { token: "mock-token-" + Date.now() } },
           status: 200,
           statusText: "OK",
           headers: {},
@@ -222,9 +222,9 @@ const mockAdapter = async (config) => {
           data: {
             success: true,
             data: {
-              relPath: updatedRelPath,
               filename: updatedFilename,
-              url: `https://picsum.photos/800/600?random=${Math.random()}`, // Just return a valid obj
+              previewUrl: `https://picsum.photos/800/600?random=${Math.random()}`,
+              rawUrl: `https://picsum.photos/800/600?random=${Math.random()}`,
               size: 1024,
               uploadTime: Date.now(),
               thumbhash: null
@@ -341,7 +341,7 @@ const mockAdapter = async (config) => {
       // Batch Move
       if (cleanUrl === "/batch/move" && method === "post") {
         resolve({
-          data: { success: true, successCount: 1, failCount: 0 },
+          data: { success: true, data: { successCount: 1, failCount: 0 } },
           status: 200,
           statusText: "OK",
           headers: {},
@@ -359,7 +359,7 @@ const mockAdapter = async (config) => {
             // Random coordinates around central China for demo
             lat: 30 + Math.random() * 10 - 5,
             lng: 110 + Math.random() * 10 - 5,
-            thumbUrl: img.url,
+            thumbUrl: img.previewUrl,
           }));
 
         resolve({
@@ -412,19 +412,65 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
-// 响应拦截器 - 处理密码错误
+// 响应拦截器 - 处理密码错误 & 标准化图片字段
+function normalizeImageFields(obj) {
+  if (!obj || typeof obj !== 'object' || !obj.rawUrl) return;
+  if (obj.previewUrl && !obj.url) obj.url = obj.previewUrl;
+  if (!obj.relPath) {
+    const raw = obj.rawUrl;
+    if (raw.startsWith('/api/images/raw/')) {
+      obj.relPath = decodeURIComponent(raw.substring('/api/images/raw/'.length));
+    } else if (raw.startsWith('/api/files/')) {
+      obj.relPath = decodeURIComponent(raw.substring('/api/files/'.length));
+    }
+  }
+  if (!obj.fileUrl && obj.relPath) {
+    obj.fileUrl = '/api/files/' + obj.relPath.split('/').map(encodeURIComponent).join('/');
+  }
+}
+
+function normalizeResponseData(body) {
+  if (!body || typeof body !== 'object') return;
+  const d = body.data;
+  if (Array.isArray(d)) {
+    d.forEach(normalizeImageFields);
+  } else if (d && typeof d === 'object') {
+    normalizeImageFields(d);
+  }
+}
+
 api.interceptors.response.use(
   (response) => {
+    if (response.data) normalizeResponseData(response.data);
     return response;
   },
   (error) => {
     if (error.response && error.response.status === 401) {
       clearPassword();
-      // Don't reload, let the app handle the auth state change
-      // window.location.reload(); 
     }
     return Promise.reject(error);
   }
 );
 
 export default api;
+
+// Helper: derive relPath from rawUrl
+export function getRelPath(image) {
+  if (!image) return '';
+  if (image.rawUrl) return decodeURIComponent(image.rawUrl.replace(/^\/api\/images\/raw\//, '').replace(/^\/api\/files\//, ''));
+  if (image.previewUrl) return decodeURIComponent(image.previewUrl.replace(/^\/api\/images\/preview\//, '').replace(/^\/api\/files\//, ''));
+  return image.filename || '';
+}
+
+// Helper: derive fileUrl from rawUrl
+export function getFileUrl(image) {
+  if (!image) return '';
+  if (image.rawUrl) return image.rawUrl.replace(/^\/api\/images\/raw\//, '/api/files/');
+  if (image.previewUrl) return image.previewUrl.replace(/^\/api\/images\/preview\//, '/api/files/');
+  return '';
+}
+
+// Helper: encode relPath for URL segments
+export function encodePath(relPath) {
+  return relPath.split('/').map(encodeURIComponent).join('/');
+}

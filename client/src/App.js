@@ -143,7 +143,8 @@ function App() {
       });
 
       if (res.data.success) {
-        message.success(res.data.message || "移动成功");
+        const { successCount = 0, failCount = 0 } = res.data.data || {};
+        message.success(failCount > 0 ? `移动完成：成功 ${successCount}，失败 ${failCount}` : "移动成功");
         setMoveModalVisible(false);
         setSelectedItems(new Set());
         setIsBatchMode(false);

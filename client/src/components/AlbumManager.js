@@ -194,7 +194,7 @@ const AlbumManager = ({ visible, onClose, api, onSelectAlbum }) => {
         burnAfterReading: shareBurn,
       });
       if (res.data.success) {
-        const url = `${window.location.origin}/share?token=${encodeURIComponent(res.data.token)}`;
+        const url = `${window.location.origin}/share?token=${encodeURIComponent(res.data.data.token)}`;
         setShareLink(url);
         // Refresh list
         await fetchShareList(currentAlbum.path);

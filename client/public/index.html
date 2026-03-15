@@ -38,6 +38,21 @@
     />
     <meta property="twitter:image" content="%PUBLIC_URL%/icon-512.png" />
 
+    <!-- JetBrains Mono Font -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jetbrains-mono@1.0.6/css/jetbrains-mono.min.css">
+    <style>
+      body {
+        font-family: 'JetBrains Mono', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+      }
+      code, pre, kbd, samp {
+        font-family: 'JetBrains Mono', source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace !important;
+      }
+      /* Ensure Ant Design components respect the font choice where appropriate */
+      .ant-typography, .ant-btn, .ant-input, .ant-menu, .ant-table {
+        font-family: 'JetBrains Mono', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif !important;
+      }
+    </style>
+
     <title>云图 - 云端一隅，拾光深藏</title>
   </head>
   <body>

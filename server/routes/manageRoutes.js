@@ -13,276 +13,229 @@ const previewService = require('../services/previewService');
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
 
-// 0. 手动同步
+// ── 内部辅助 ──────────────────────────────────────────────────────────────────
+
+function shouldUseTrash(req) {
+    const param = req.query.useTrash;
+    return param !== undefined ? param === 'true' : !!(config.deletion && config.deletion.useTrash);
+}
+
+async function moveToTrash(filePath) {
+    const ext = path.extname(filePath);
+    const name = path.basename(filePath, ext);
+    const trashPath = path.join(STORAGE_PATH, TRASH_DIR_NAME, `${name}_${Date.now()}${ext}`);
+    await fs.ensureDir(path.dirname(trashPath));
+    await fs.move(filePath, trashPath, { overwrite: true });
+}
+
+async function cleanupRelatedFiles(filePath, relPath) {
+    const cacheFile = path.join(path.dirname(filePath), CACHE_DIR_NAME, `${path.basename(filePath)}.th`);
+    if (await fs.pathExists(cacheFile)) await fs.remove(cacheFile);
+    await previewService.deletePreview(relPath);
+    imageRepository.delete(relPath);
+}
+
+async function moveRelatedFiles(oldFilePath, oldRelPath, newFilePath, newRelPath) {
+    // 移动 thumbhash 缓存
+    const oldCachePath = path.join(path.dirname(oldFilePath), CACHE_DIR_NAME, `${path.basename(oldFilePath)}.th`);
+    if (await fs.pathExists(oldCachePath)) {
+        const newCacheDir = path.join(path.dirname(newFilePath), CACHE_DIR_NAME);
+        await fs.ensureDir(newCacheDir);
+        await fs.move(oldCachePath, path.join(newCacheDir, `${path.basename(newFilePath)}.th`));
+    }
+    // 移动预览图
+    const oldPreviewPath = await previewService.getPreviewPath(oldRelPath);
+    if (oldPreviewPath && await fs.pathExists(oldPreviewPath)) {
+        const newPreviewDir = path.join(path.dirname(newFilePath), previewService.PREVIEW_DIR_NAME);
+        await fs.ensureDir(newPreviewDir);
+        const newPreviewFilename = path.parse(path.basename(newFilePath)).name + '.webp';
+        await fs.move(oldPreviewPath, path.join(newPreviewDir, newPreviewFilename));
+    }
+}
+
+async function resolveUniquePath(basePath, dir, filename) {
+    let filePath = safeJoin(basePath, path.join(dir, filename));
+    if (!await fs.pathExists(filePath)) return { filePath, relPath: path.join(dir, filename).replace(/\\/g, '/') };
+
+    const ext = path.extname(filename);
+    const name = path.basename(filename, ext);
+    let counter = 1;
+    while (await fs.pathExists(filePath)) {
+        const candidate = `${name}_${Date.now()}_${counter}${ext}`;
+        filePath = safeJoin(basePath, path.join(dir, candidate));
+        counter++;
+    }
+    const relPath = path.relative(basePath, filePath).replace(/\\/g, '/');
+    return { filePath, relPath };
+}
+
+// ── 同步 ──────────────────────────────────────────────────────────────────────
+
 router.post('/sync', requirePassword, async (req, res) => {
     try {
         await syncFileSystem();
-        res.json({ success: true, message: "同步完成" });
+        res.json({ success: true });
     } catch (e) {
-        console.error("Sync failed:", e);
-        res.status(500).json({ success: false, error: "同步失败" });
+        console.error('Sync failed:', e);
+        res.status(500).json({ success: false, error: 'Sync failed' });
     }
 });
 
-// 1. 相册密码管理
+// ── 相册密码 ──────────────────────────────────────────────────────────────────
+
 router.post('/album/password', requirePassword, async (req, res) => {
     try {
         const { dir, password } = req.body;
-        if (dir === undefined) return res.status(400).json({ error: "Missing directory" });
+        if (dir === undefined) return res.status(400).json({ success: false, error: 'Missing directory' });
 
         await setAlbumPassword(dir, password || null);
-        res.json({ success: true, message: password ? "密码设置成功" : "密码已移除" });
+        res.json({ success: true });
     } catch (e) {
-        console.error("Set album password error:", e);
-        res.status(500).json({ error: "设置密码失败" });
+        console.error('Set album password error:', e);
+        res.status(500).json({ success: false, error: 'Failed to set album password' });
     }
 });
 
 router.post('/album/verify', requirePassword, async (req, res) => {
     try {
         const { dir, password } = req.body;
-        if (dir === undefined) return res.status(400).json({ error: "Missing directory" });
+        if (dir === undefined) return res.status(400).json({ success: false, error: 'Missing directory' });
 
         const isValid = await verifyAlbumPassword(dir, password);
-        if (isValid) {
-            res.json({ success: true, message: "验证通过" });
-        } else {
-            res.status(401).json({ success: false, error: "密码错误" });
-        }
+        if (!isValid) return res.status(401).json({ success: false, error: 'Incorrect password' });
+        res.json({ success: true });
     } catch (e) {
-        res.status(500).json({ error: "验证失败" });
+        res.status(500).json({ success: false, error: 'Verification failed' });
     }
 });
 
-// 2. 回收站逻辑
-async function moveToTrash(filePath) {
-    try {
-        const fileName = path.basename(filePath);
-        const ext = path.extname(fileName);
-        const nameWithoutExt = path.basename(fileName, ext);
-        const timestamp = Date.now();
-        const trashName = `${nameWithoutExt}_${timestamp}${ext}`;
-        const trashPath = path.join(STORAGE_PATH, TRASH_DIR_NAME, trashName);
+// ── 删除 ──────────────────────────────────────────────────────────────────────
 
-        await fs.ensureDir(path.dirname(trashPath));
-        await fs.move(filePath, trashPath, { overwrite: true });
-        return true;
-    } catch (error) {
-        console.error("[Trash] Move failed:", error);
-        throw error;
-    }
-}
-
-// 3. 删除图片
 router.delete('/images/*', requirePassword, async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     try {
         const filePath = safeJoin(STORAGE_PATH, relPath);
-        if (await fs.pathExists(filePath)) {
-            // 从请求参数中读取策略，或使用配置文件中的默认值
-            const useTrashParam = req.query.useTrash;
-            const useTrash = useTrashParam !== undefined 
-                ? useTrashParam === 'true' 
-                : (config.deletion && config.deletion.useTrash);
-            
-            if (useTrash) {
-                await moveToTrash(filePath);
-            } else {
-                // 真实删除
-                await fs.remove(filePath);
-            }
-
-            // 移除 thumbhash
-            const dir = path.dirname(filePath);
-            const filename = path.basename(filePath);
-            const cacheFile = path.join(dir, CACHE_DIR_NAME, `${filename}.th`);
-            if (await fs.pathExists(cacheFile)) await fs.remove(cacheFile);
-
-            // 删除预览图
-            await previewService.deletePreview(relPath);
-
-            // 从 DB 移除
+        if (!await fs.pathExists(filePath)) {
             imageRepository.delete(relPath);
-
-            res.json({ success: true });
-        } else {
-            // 如果不在磁盘上但在 DB 中？
-            imageRepository.delete(relPath);
-            res.status(404).json({ error: "图片不存在 (但在数据库中已清理)" });
+            return res.status(404).json({ success: false, error: 'File not found' });
         }
+
+        if (shouldUseTrash(req)) {
+            await moveToTrash(filePath);
+        } else {
+            await fs.remove(filePath);
+        }
+        await cleanupRelatedFiles(filePath, relPath);
+        res.json({ success: true });
     } catch (e) {
-        res.status(400).json({ error: "操作失败" });
+        console.error('Delete image error:', e);
+        res.status(500).json({ success: false, error: 'Delete failed' });
     }
 });
 
-// 4. 删除文件
 router.delete('/files/*', requirePassword, async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     try {
         const filePath = safeJoin(STORAGE_PATH, relPath);
-        if (await fs.pathExists(filePath)) {
-            // 从请求参数中读取策略，或使用配置文件中的默认值
-            const useTrashParam = req.query.useTrash;
-            const useTrash = useTrashParam !== undefined 
-                ? useTrashParam === 'true' 
-                : (config.deletion && config.deletion.useTrash);
-            
-            if (useTrash) {
-                await moveToTrash(filePath);
-            } else {
-                // 真实删除
-                await fs.remove(filePath);
-            }
-            // 删除预览图
-            await previewService.deletePreview(relPath);
-            // 如果存在则从 DB 移除（可能是通过 upload-file 上传的）
-            imageRepository.delete(relPath);
-            res.json({ success: true, message: useTrash ? "文件已移至回收站" : "文件已删除" });
-        } else {
-            res.status(404).json({ error: "文件不存在" });
+        if (!await fs.pathExists(filePath)) {
+            return res.status(404).json({ success: false, error: 'File not found' });
         }
+
+        if (shouldUseTrash(req)) {
+            await moveToTrash(filePath);
+        } else {
+            await fs.remove(filePath);
+        }
+        await cleanupRelatedFiles(filePath, relPath);
+        res.json({ success: true });
     } catch (e) {
-        res.status(400).json({ error: "操作失败" });
+        console.error('Delete file error:', e);
+        res.status(500).json({ success: false, error: 'Delete failed' });
     }
 });
 
-// 5. 批量移动
+// ── 批量移动 ──────────────────────────────────────────────────────────────────
+
 router.post('/batch/move', requirePassword, async (req, res) => {
     try {
         const { files, targetDir } = req.body;
         if (!Array.isArray(files) || files.length === 0) {
-            return res.status(400).json({ error: "未选择文件" });
+            return res.status(400).json({ success: false, error: 'No files selected' });
         }
 
-        let newDir = targetDir || "";
-        newDir = newDir.replace(/\\/g, "/").trim();
-        const absTargetDir = safeJoin(STORAGE_PATH, newDir);
-        await fs.ensureDir(absTargetDir);
+        const newDir = (targetDir || '').replace(/\\/g, '/').trim();
+        await fs.ensureDir(safeJoin(STORAGE_PATH, newDir));
 
-        let successCount = 0;
-        let failCount = 0;
+        let successCount = 0, failCount = 0;
 
         for (const relPath of files) {
             try {
-                const oldRelPath = decodeURIComponent(relPath).replace(/\\/g, "/");
+                const oldRelPath = decodeURIComponent(relPath).replace(/\\/g, '/');
                 const oldFilePath = safeJoin(STORAGE_PATH, oldRelPath);
+                if (!await fs.pathExists(oldFilePath)) { failCount++; continue; }
 
-                if (await fs.pathExists(oldFilePath)) {
-                    const filename = path.basename(oldFilePath);
-                    let newRelPath = path.join(newDir, filename).replace(/\\/g, "/");
-                    let newFilePath = safeJoin(STORAGE_PATH, newRelPath);
+                const filename = path.basename(oldFilePath);
+                const { filePath: newFilePath, relPath: newRelPath } = await resolveUniquePath(STORAGE_PATH, newDir, filename);
 
-                    // Handle duplicates
-                    if (await fs.pathExists(newFilePath)) {
-                        let counter = 1;
-                        const ext = path.extname(filename);
-                        const nameBase = path.basename(filename, ext);
-                        while (await fs.pathExists(newFilePath)) {
-                            const newName = `${nameBase}_${Date.now()}_${counter}${ext}`;
-                            newRelPath = path.join(newDir, newName).replace(/\\/g, "/");
-                            newFilePath = safeJoin(STORAGE_PATH, newRelPath);
-                            counter++;
-                        }
-                    }
+                await fs.move(oldFilePath, newFilePath);
+                await moveRelatedFiles(oldFilePath, oldRelPath, newFilePath, newRelPath);
 
-                    await fs.move(oldFilePath, newFilePath);
-
-                    // 更新 DB：删除旧的，添加新的（重新扫描元数据？或者只是更新路径？）
-                    // 元数据应该不会改变太多，除非移动影响 mtime（通常在同一 FS 上不会）
-                    // 但更新路径最简单。
-                    // 但是，thumbhash 缓存文件也需要移动！
-
-                    // 移动 thumbhash
-                    const oldCachePath = path.join(path.dirname(oldFilePath), CACHE_DIR_NAME, `${filename}.th`);
-                    if (await fs.pathExists(oldCachePath)) {
-                        const newCacheDir = path.join(path.dirname(newFilePath), CACHE_DIR_NAME);
-                        await fs.ensureDir(newCacheDir);
-                        const newCachePath = path.join(newCacheDir, `${path.basename(newFilePath)}.th`);
-                        await fs.move(oldCachePath, newCachePath);
-                    }
-                    // 移动预览图
-                    const oldPreviewPath = await previewService.getPreviewPath(oldRelPath);
-                    if (oldPreviewPath && await fs.pathExists(oldPreviewPath)) {
-                        const newPreviewDir = path.join(
-                            path.dirname(safeJoin(STORAGE_PATH, newRelPath)), 
-                            previewService.PREVIEW_DIR_NAME
-                        );
-                        await fs.ensureDir(newPreviewDir);
-                        const newPreviewFilename = path.parse(path.basename(newFilePath)).name + '.webp';
-                        const newPreviewPath = path.join(newPreviewDir, newPreviewFilename);
-                        await fs.move(oldPreviewPath, newPreviewPath);
-                    }
-                    // 更新 DB
-                    const dbImage = imageRepository.getByPath(oldRelPath);
-                    if (dbImage) {
-                        dbImage.rel_path = newRelPath;
-                        dbImage.filename = path.basename(newFilePath);
-                        // 更新缓存中的 thumbhash 路径？不，DB 直接在 'thumbhash' 列中存储内容？
-                        // 等等，Schema 中 'thumbhash' 是 TEXT (base64)。
-                        // 所以我们不需要更新 DB thumbhash 内容，除非重新生成。
-                        // 我们只需更新路径。
-                        imageRepository.delete(oldRelPath);
-                        imageRepository.add(dbImage);
-                        // 或者在此处更新 rel_path = old... 但主键是 ID。
-                        // rel_path 是唯一的。
-                        // 其实 `imageRepository.update` 使用 rel_path 作为键。
-                        // 所以我不能轻易用我写的 `update` 函数更改 rel_path。
-                        // `updateImage` SQL: WHERE rel_path = @relPath。
-                        // 所以我必须删除并添加。
-                    }
-
-                    successCount++;
-                } else {
-                    failCount++;
+                const dbImage = imageRepository.getByPath(oldRelPath);
+                if (dbImage) {
+                    imageRepository.delete(oldRelPath);
+                    dbImage.rel_path = newRelPath;
+                    dbImage.filename = path.basename(newFilePath);
+                    imageRepository.add(dbImage);
                 }
+                successCount++;
             } catch (e) {
                 console.error(`Move failed for ${relPath}:`, e);
                 failCount++;
             }
         }
-        res.json({ success: true, successCount, failCount });
-
+        res.json({ success: true, data: { successCount, failCount } });
     } catch (e) {
-        res.status(500).json({ error: "批量移动失败" });
+        console.error('Batch move error:', e);
+        res.status(500).json({ success: false, error: 'Batch move failed' });
     }
 });
 
-// 6. 创建目录
+// ── 创建目录 ──────────────────────────────────────────────────────────────────
+
 router.post('/directories', requirePassword, async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) return res.status(400).json({ error: "Missing directory name" });
-
-        // Basic validation
-        if (name.includes("..") || name.includes("\\") || name.startsWith("/")) {
-            return res.status(400).json({ error: "Invalid directory name" });
+        if (!name) return res.status(400).json({ success: false, error: 'Missing directory name' });
+        if (name.includes('..') || name.includes('\\') || name.startsWith('/')) {
+            return res.status(400).json({ success: false, error: 'Invalid directory name' });
         }
 
         const absDir = safeJoin(STORAGE_PATH, name);
         if (await fs.pathExists(absDir)) {
-            return res.status(400).json({ error: "Directory already exists" });
+            return res.status(409).json({ success: false, error: 'Directory already exists' });
         }
 
         await fs.ensureDir(absDir);
-        res.json({ success: true, message: "目录创建成功" });
+        res.json({ success: true, data: { path: name } });
     } catch (e) {
-        console.error("Create directory failed:", e);
-        res.status(500).json({ error: "创建目录失败" });
+        console.error('Create directory failed:', e);
+        res.status(500).json({ success: false, error: 'Failed to create directory' });
     }
 });
 
-// 7. 重命名/移动图片
+// ── 重命名/移动图片 ──────────────────────────────────────────────────────────
+
 router.put('/images/*', requirePassword, async (req, res) => {
     const relPath = decodeURIComponent(req.params[0]);
     try {
         const { newName, newDir } = req.body;
         if (!newName && newDir === undefined) {
-            return res.status(400).json({ success: false, error: "缺少 newName 或 newDir 参数" });
+            return res.status(400).json({ success: false, error: 'Missing newName or newDir' });
         }
 
         const oldFilePath = safeJoin(STORAGE_PATH, relPath);
         if (!await fs.pathExists(oldFilePath)) {
-            return res.status(404).json({ success: false, error: "图片不存在" });
+            return res.status(404).json({ success: false, error: 'File not found' });
         }
 
         const oldDir = path.dirname(relPath).replace(/\\/g, '/');
@@ -291,17 +244,13 @@ router.put('/images/*', requirePassword, async (req, res) => {
         const targetFilename = newName ? sanitizeFilename(newName) : oldFilename;
         let newRelPath = (targetDir ? targetDir + '/' : '') + targetFilename;
 
-        // 防止同位置同名
         if (newRelPath === relPath) {
             return res.json({ success: true, data: formatImageResponse(req, imageRepository.getByPath(relPath)) });
         }
 
-        const absTargetDir = safeJoin(STORAGE_PATH, targetDir);
-        await fs.ensureDir(absTargetDir);
-
+        await fs.ensureDir(safeJoin(STORAGE_PATH, targetDir));
         let newFilePath = safeJoin(STORAGE_PATH, newRelPath);
 
-        // 重复检查
         if (await fs.pathExists(newFilePath)) {
             let counter = 1;
             const ext = path.extname(targetFilename);
@@ -315,25 +264,8 @@ router.put('/images/*', requirePassword, async (req, res) => {
         }
 
         await fs.move(oldFilePath, newFilePath);
+        await moveRelatedFiles(oldFilePath, relPath, newFilePath, newRelPath);
 
-        // 移动 thumbhash
-        const oldCachePath = path.join(path.dirname(oldFilePath), CACHE_DIR_NAME, `${oldFilename}.th`);
-        if (await fs.pathExists(oldCachePath)) {
-            const newCacheDir = path.join(path.dirname(newFilePath), CACHE_DIR_NAME);
-            await fs.ensureDir(newCacheDir);
-            await fs.move(oldCachePath, path.join(newCacheDir, `${path.basename(newFilePath)}.th`));
-        }
-
-        // 移动预览图
-        const oldPreviewPath = await previewService.getPreviewPath(relPath);
-        if (oldPreviewPath && await fs.pathExists(oldPreviewPath)) {
-            const newPreviewDir = path.join(path.dirname(newFilePath), previewService.PREVIEW_DIR_NAME);
-            await fs.ensureDir(newPreviewDir);
-            const newPreviewFilename = path.parse(path.basename(newFilePath)).name + '.webp';
-            await fs.move(oldPreviewPath, path.join(newPreviewDir, newPreviewFilename));
-        }
-
-        // 更新 DB
         const dbImage = imageRepository.getByPath(relPath);
         if (dbImage) {
             imageRepository.delete(relPath);
@@ -345,8 +277,8 @@ router.put('/images/*', requirePassword, async (req, res) => {
         const updated = imageRepository.getByPath(newRelPath);
         res.json({ success: true, data: formatImageResponse(req, updated || { rel_path: newRelPath, filename: path.basename(newFilePath) }) });
     } catch (e) {
-        console.error("Rename/move error:", e);
-        res.status(500).json({ success: false, error: "重命名/移动失败" });
+        console.error('Rename/move error:', e);
+        res.status(500).json({ success: false, error: 'Rename/move failed' });
     }
 });
 

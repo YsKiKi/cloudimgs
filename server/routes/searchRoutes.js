@@ -8,23 +8,18 @@ const { formatImageResponse } = require('../utils/urlUtils');
 router.post('/semantic', requirePassword, async (req, res) => {
     try {
         const { query, limit } = req.body;
-        if (!query) return res.status(400).json({ success: false, error: "Query is required" });
+        if (!query) return res.status(400).json({ success: false, error: 'Query is required' });
 
         const results = await clipService.search(query, limit || 50);
+        const data = results.map(r => ({
+            ...formatImageResponse(req, r),
+            score: r.distance
+        }));
 
-        // 使用 formatImageResponse 标准化输出
-        const finalResults = results.map(r => {
-            const formatted = formatImageResponse(req, r);
-            return {
-                ...formatted,
-                score: r.distance
-            };
-        });
-
-        res.json({ success: true, data: finalResults });
+        res.json({ success: true, data });
     } catch (error) {
-        console.error("Semantic search error:", error);
-        res.status(500).json({ success: false, error: "Search failed" });
+        console.error('Semantic search error:', error);
+        res.status(500).json({ success: false, error: 'Search failed' });
     }
 });
 
@@ -32,28 +27,30 @@ router.post('/semantic', requirePassword, async (req, res) => {
 router.post('/scan', requirePassword, async (req, res) => {
     try {
         const result = await clipService.scanAll();
-        res.json({ success: true, ...result });
+        res.json({ success: true, data: result });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// 重新索引所有图片 (清除 DB 并重新扫描)
+// 重建索引
 router.post('/reindex', requirePassword, async (req, res) => {
     try {
         const result = await clipService.reindex();
-        res.json({ success: true, ...result });
+        res.json({ success: true, data: result });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// 状态
+// 队列状态
 router.get('/status', requirePassword, (req, res) => {
     res.json({
         success: true,
-        queueLength: clipService.queue.length,
-        processing: clipService.processing
+        data: {
+            queueLength: clipService.queue.length,
+            processing: clipService.processing
+        }
     });
 });
 
