@@ -63,8 +63,16 @@ const ApiDocs = () => {
 
   const buildCurl = (endpoint, method = 'GET', options = {}) => {
     const fullUrl = `${origin}${endpoint}`;
-    const pwdHeader = savedPassword ? ` -H "X-Access-Password: ${savedPassword}"` : "";
-    const albumPwdHeader = options.albumPassword ? ` -H "X-Album-Password: ${options.albumPassword}"` : "";
+    
+    // 辅助函数：转义单引号以用于 shell 单引号字符串
+    const escapeSingleQuote = (str) => str.replace(/'/g, "'\\''");
+    
+    const pwdHeader = savedPassword 
+      ? ` -H 'X-Access-Password: ${escapeSingleQuote(savedPassword)}'` 
+      : "";
+    const albumPwdHeader = options.albumPassword 
+      ? ` -H 'X-Album-Password: ${escapeSingleQuote(options.albumPassword)}'` 
+      : "";
     let cmd = `curl -X ${method} "${fullUrl}"${pwdHeader}${albumPwdHeader}`;
 
     if (method === 'POST') {
