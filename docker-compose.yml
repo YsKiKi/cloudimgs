@@ -16,5 +16,8 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - STORAGE_PATH=/app/uploads
+      # 速率限制配置（可选）
+      - UPLOAD_RATE_LIMIT=0   # 每分钟上传请求上限，0=不限制（默认300）
+      # - LOGIN_RATE_LIMIT=10  # 每分钟登录请求上限（默认10，建议保留）
       # 密码保护配置（可选）
       # - PASSWORD=your_password_here

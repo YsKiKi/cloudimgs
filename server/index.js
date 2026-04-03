@@ -31,21 +31,24 @@ app.use(express.json({ limit: '10mb' }));
 // 登录接口速率限制 — 防暴力破解
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 10,
+  max: config.rateLimit.loginMaxPerMinute,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: "请求过于频繁，请稍后再试" },
 });
 app.use('/api/auth/login', loginLimiter);
 
-// 上传接口速率限制
-const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: "上传过于频繁，请稍后再试" },
-});
+// 上传接口速率限制（可通过 UPLOAD_RATE_LIMIT 环境变量调整，0 表示不限制）
+const uploadRateMax = config.rateLimit.uploadMaxPerMinute;
+const uploadLimiter = uploadRateMax > 0
+  ? rateLimit({
+      windowMs: 60 * 1000,
+      max: uploadRateMax,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { success: false, error: "上传过于频繁，请稍后再试" },
+    })
+  : (req, res, next) => next(); // 0 = 不限制
 app.use('/api/upload', uploadLimiter);
 app.use('/api/upload-base64', uploadLimiter);
 app.use('/api/upload-file', uploadLimiter);

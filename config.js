@@ -102,6 +102,19 @@ module.exports = {
     },
   },
 
+  // 速率限制配置
+  rateLimit: {
+    // 上传接口：每分钟最大请求次数（0 表示不限制）
+    uploadMaxPerMinute: process.env.UPLOAD_RATE_LIMIT
+      ? parseInt(process.env.UPLOAD_RATE_LIMIT)
+      : 300,
+
+    // 登录接口：每分钟最大请求次数
+    loginMaxPerMinute: process.env.LOGIN_RATE_LIMIT
+      ? parseInt(process.env.LOGIN_RATE_LIMIT)
+      : 10,
+  },
+
   // 魔法搜图配置
   magicSearch: {
     enabled: process.env.ENABLE_MAGIC_SEARCH === "true",
