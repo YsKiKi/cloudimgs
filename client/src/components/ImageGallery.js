@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Masonry,
   Button,
@@ -41,6 +41,19 @@ import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
 
+const getCacheBustedUrl = (img, width = 0) => {
+  if (!img) return "";
+  let u = img.url;
+  if (!u) return "";
+  const t = img.mtime || (img.uploadTime ? new Date(img.uploadTime).getTime() : 0);
+  if (t) {
+    u += u.includes('?') ? `&t=${t}` : `?t=${t}`;
+  }
+  if (width > 0) {
+    u += u.includes('?') ? `&w=${width}` : `?w=${width}`;
+  }
+  return u;
+};
 // Helper to convert base64 thumbhash to data URL
 const getThumbHashUrl = (hash) => {
   if (!hash) return null;
@@ -1619,14 +1632,14 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     setImages(prev => prev.map(img => img.relPath === previewFile.relPath ? { ...img, ...updatedFile } : img));
     setPreviewFile(updatedFile);
     setPreviewTitle(updatedFile.filename);
-    setPreviewImage(updatedFile.url);
+    setPreviewImage(getCacheBustedUrl(updatedFile));
   };
 
   const handlePreview = (file) => {
     // Find index in current images list
     const index = images.findIndex(img => img.relPath === file.relPath);
     setPreviewIndex(index);
-    setPreviewImage(file.url);
+    setPreviewImage(getCacheBustedUrl(file));
     setPreviewVisible(true);
     setPreviewTitle(file.filename);
     setPreviewFile(file);

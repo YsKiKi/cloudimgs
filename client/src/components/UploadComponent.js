@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import {
   Upload,
   Button,
@@ -28,6 +28,34 @@ function sanitizeDir(input) {
   dir = dir.replace(/\/+/, "/"); // 合并多余斜杠
   return dir;
 }
+
+// 并发请求限制器
+class ConcurrencyLimiter {
+  constructor(limit) {
+    this.limit = limit;
+    this.active = 0;
+    this.queue = [];
+  }
+
+  add(task) {
+    return new Promise((resolve, reject) => {
+      this.queue.push(() => task().then(resolve).catch(reject));
+      this.next();
+    });
+  }
+
+  next() {
+    if (this.active < this.limit && this.queue.length > 0) {
+      const task = this.queue.shift();
+      this.active++;
+      task().finally(() => {
+        this.active--;
+        this.next();
+      });
+    }
+  }
+}
+const uploadLimiter = new ConcurrencyLimiter(5); // 限制并发数为5
 
 const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
   const {
@@ -121,8 +149,9 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
       : `/upload?duplicateStrategy=${duplicateStrategy}`;
 
     try {
-      // 配置axios请求选项（超时由拦截器对multipart请求自动取消）
+      // 配置axios请求选项，禁用超时限制防止大文件长连接断开
       const axiosConfig = {
+        timeout: 0, // 取消单次上传超时限制，防止大文件长连接断开
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -491,7 +520,7 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text ellipsis style={{ maxWidth: '70%', color: isDarkMode ? '#fff' : undefined }}>{item.name}</Text>
                     <Text type="secondary" style={{ color: isDarkMode ? 'rgba(255,255,255,0.45)' : undefined }}>
-                      {item.status === 'error' ? '失败' : item.status === 'success' ? '完成' : `${item.progress}%`}
+                      {item.status === 'error' ? '失败' : item.status === 'success' ? '完成' : item.status === 'pending' ? '排队中...' : `${item.progress}%`}
                     </Text>
                   </div>
                   <Progress

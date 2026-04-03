@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+﻿import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Masonry, Spin, Typography, Empty, message, theme, Modal, Button, Grid, Space } from "antd";
 import {
     EnvironmentOutlined, DownloadOutlined, LeftOutlined,
@@ -12,6 +12,23 @@ import ScrollingBackground from "./ScrollingBackground";
 
 const { Title, Text } = Typography;
 const { useBreakpoint } = Grid;
+
+const getCacheBustedUrl = (img, width = 0) => {
+    if (!img) return "";
+    let u = img.url || img; // Handle passing just URL string if needed, although we prefer the whole object
+    if (typeof u !== 'string') return "";
+    
+    // Check if we passed the full image object to get mtime
+    const mtime = img.mtime || (img.uploadTime ? new Date(img.uploadTime).getTime() : 0);
+    
+    if (mtime) {
+        u += u.includes('?') ? `&t=${mtime}` : `?t=${mtime}`;
+    }
+    if (width > 0) {
+        u += u.includes('?') ? `&w=${width}` : `?w=${width}`;
+    }
+    return u;
+};
 
 // Helper to convert base64 thumbhash to data URL
 const getThumbHashUrl = (hash) => {
@@ -105,7 +122,7 @@ const ImageItem = ({ image, hoverKey, setHoverKey, handlePreview, isMobile, hand
                     return (
                         <img
                             alt={image.filename}
-                            src={thumbnailWidth > 0 ? `${image.url}?w=${thumbnailWidth}` : image.url}
+                            src={getCacheBustedUrl(image, thumbnailWidth)}
                             draggable={false}
                             loading="lazy"
                             onLoad={() => setLoaded(true)}
@@ -595,7 +612,7 @@ const ShareView = ({ currentTheme, onThemeChange }) => {
                                                 boxShadow: "0 20px 50px rgba(0,0,0,0.5)", zIndex: 2,
                                                 opacity: imgLoaded ? 1 : 0, transition: "opacity 0.3s ease"
                                             }}
-                                            src={previewFile.url}
+                                            src={getCacheBustedUrl(previewFile)}
                                         />
                                     </>
                                 )}

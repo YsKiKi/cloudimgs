@@ -1,13 +1,14 @@
-const express = require('express');
+﻿const express = require('express');
 const path = require('path');
 const fs = require('fs-extra');
 const mime = require('mime-types');
 const sharp = require('sharp');
+sharp.cache(false);
 const config = require('../../config');
 const imageRepository = require('../db/imageRepository');
 const { requirePassword } = require('../middleware/auth');
 const { safeJoin, getThumbHash, generateThumbHash, CACHE_DIR_NAME, TRASH_DIR_NAME, CONFIG_DIR_NAME } = require('../utils/fileUtils');
-const { verifyAlbumPassword, isAlbumLocked } = require('../utils/albumUtils');
+const { verifyAlbumPassword, isAlbumLocked, getAllLockedDirectories } = require('../utils/albumUtils');
 const { formatImageResponse, parseMeta } = require('../utils/urlUtils');
 const previewService = require('../services/previewService');
 
@@ -190,8 +191,10 @@ async function resolvePreviewPath(relPath) {
 // ── 地图数据 ──────────────────────────────────────────────────────────────────
 
 router.get('/map-data', requirePassword, async (req, res) => {
+    const lockedDirs = await getAllLockedDirectories();
     const images = imageRepository.getAll();
     const data = images.filter(img => {
+        if (lockedDirs.some(lockedDir => img.rel_path.startsWith(lockedDir + "/"))) return false;
         const meta = parseMeta(img);
         return meta.gps;
     }).map(img => {
@@ -229,14 +232,19 @@ router.get('/directories', requirePassword, async (req, res) => {
                     if (!stats.isDirectory()) continue;
 
                     const relPath = path.join(dir, file).replace(/\\/g, '/');
-                    const previews = imageRepository.getPreviews(relPath, 3).map(img =>
-                        `/api/images/${img.rel_path.split('/').map(encodeURIComponent).join('/')}?w=400`
-                    );
+                    const isLocked = await isAlbumLocked(relPath);
+                    let previews = [];
+                    if (!isLocked) {
+                        previews = imageRepository.getPreviews(relPath, 3).map(img =>
+                            `/api/images/${img.rel_path.split('/').map(encodeURIComponent).join('/')}?w=400`
+                        );
+                    }
 
                     results.push({
                         name: file,
                         path: relPath,
                         previews,
+                        locked: isLocked,
                         imageCount: imageRepository.countByDir(relPath),
                         mtime: stats.mtime
                     });
@@ -271,7 +279,23 @@ router.get('/images', requirePassword, async (req, res) => {
             }
         }
 
-        const { data: paginated, total } = imageRepository.paginate(dir, search, page, pageSize);
+        // 当查看全部图片时，过滤加密目录中的图片
+        let paginateResult;
+        if (!dir) {
+            const lockedDirs = await getAllLockedDirectories();
+            let allImages = imageRepository.getAll();
+            if (search) {
+                allImages = allImages.filter(img => img.filename.toLowerCase().includes(search.toLowerCase()));
+            }
+            allImages = allImages.filter(img => !lockedDirs.some(lockedDir => img.rel_path.startsWith(lockedDir + '/')));
+            const total = allImages.length;
+            const startIndex = (page - 1) * pageSize;
+            const paginated = allImages.slice(startIndex, startIndex + pageSize);
+            paginateResult = { data: paginated, total };
+        } else {
+            paginateResult = imageRepository.paginate(dir, search, page, pageSize);
+        }
+        const { data: paginated, total } = paginateResult;
 
         res.setHeader('Cache-Control', 'no-store');
         res.json({

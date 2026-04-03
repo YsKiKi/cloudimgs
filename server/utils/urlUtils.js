@@ -29,6 +29,8 @@ function formatImageResponse(req, image) {
         height: image.height,
         size: image.size,
         format: meta.format,
+        mtime: image.mtime,
+        mime: image.mime_type,
 
         space: meta.space,
         channels: meta.channels,
