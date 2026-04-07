@@ -97,17 +97,22 @@ async function getAllFiles(dir) {
 async function syncFileSystem() {
     console.log("Starting file system sync...");
     const diskFiles = await getAllFiles("");
-    const dbImages = imageRepository.getAll();
 
-    const diskMap = new Map(diskFiles.map(f => [f.relPath, f]));
-    const dbMap = new Map(dbImages.map(i => [i.rel_path, i]));
+    // 只从 DB 获取 rel_path 和 mtime，减少内存占用
+    const dbImages = imageRepository.getAll();
+    const dbMap = new Map(dbImages.map(i => [i.rel_path, i.mtime]));
+    // dbImages 数组不再需要，释放引用
+    dbImages.length = 0;
+
+    const diskPaths = new Set();
 
     // 1. 磁盘上的文件但不在 DB 中（新增）
     // 2. 磁盘上的文件在 DB 中（如果修改则更新）
     for (const file of diskFiles) {
-        const dbEntry = dbMap.get(file.relPath);
+        diskPaths.add(file.relPath);
+        const dbMtime = dbMap.get(file.relPath);
 
-        if (!dbEntry) {
+        if (dbMtime === undefined) {
             // 新文件
             try {
                 const metadata = await getFileMetadata(file.filePath, file.relPath, file.stat);
@@ -122,8 +127,7 @@ async function syncFileSystem() {
             }
         } else {
             // 现有文件，检查 mtime
-            // 注意：dbEntry.mtime 来自 DB
-            if (Math.abs(dbEntry.mtime - file.stat.mtime.getTime()) > 1000) { // 1 秒容差
+            if (Math.abs(dbMtime - file.stat.mtime.getTime()) > 1000) { // 1 秒容差
                 console.log(`Updating modified file: ${file.relPath}`);
                 try {
                     const metadata = await getFileMetadata(file.filePath, file.relPath, file.stat);
@@ -136,12 +140,14 @@ async function syncFileSystem() {
             }
         }
     }
+    // 释放 diskFiles
+    diskFiles.length = 0;
 
     // 3. 在 DB 中但不在磁盘上（删除）
-    for (const img of dbImages) {
-        if (!diskMap.has(img.rel_path)) {
-            console.log(`Removing missing file from DB: ${img.rel_path}`);
-            imageRepository.delete(img.rel_path);
+    for (const [relPath] of dbMap) {
+        if (!diskPaths.has(relPath)) {
+            console.log(`Removing missing file from DB: ${relPath}`);
+            imageRepository.delete(relPath);
         }
     }
     console.log("Sync completed.");

@@ -4,6 +4,7 @@ const fs = require('fs-extra');
 const mime = require('mime-types');
 const sharp = require('sharp');
 sharp.cache(false);
+sharp.concurrency(1);  // 限制 libvips 线程数，降低内存占用
 const config = require('../../config');
 const imageRepository = require('../db/imageRepository');
 const { requirePassword } = require('../middleware/auth');

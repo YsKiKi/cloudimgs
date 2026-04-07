@@ -4,6 +4,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const sharp = require('sharp');
 sharp.cache(false);
+sharp.concurrency(1);  // 限制 libvips 线程数，降低内存占用
 const { getThumbHash, generateThumbHash } = require("../utils/fileUtils");
 
 async function parseImageMetadata(filePath) {

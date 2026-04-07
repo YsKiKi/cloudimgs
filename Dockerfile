@@ -126,6 +126,8 @@ EXPOSE 3001
 ENV NODE_ENV=production
 ENV PORT=3001
 ENV STORAGE_PATH=/app/uploads
+# 限制 Node.js 堆内存，防止内存膨胀
+ENV NODE_OPTIONS="--max-old-space-size=384 --max-semi-space-size=8"
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=002

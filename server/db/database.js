@@ -9,6 +9,13 @@ fs.ensureDirSync(path.dirname(dbPath));
 
 const db = new Database(dbPath, { verbose: process.env.NODE_ENV === 'development' ? console.log : null });
 
+// 性能优化：WAL 模式 + 内存控制
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = -8000');  // 8MB（负数单位为 KB）
+db.pragma('temp_store = MEMORY');
+db.pragma('mmap_size = 67108864');  // 64MB mmap，减少系统调用
+
 // Load sqlite-vec extension if Magic Search is enabled
 if (config.magicSearch.enabled) {
   try {
