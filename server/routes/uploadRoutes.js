@@ -10,6 +10,7 @@ const imageRepository = require('../db/imageRepository');
 const { getFileMetadata, parseAudioDuration } = require('../services/metadataService');
 const clipService = require('../services/clipService');
 const previewService = require('../services/previewService');
+const sharp = require('sharp');
 
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
@@ -96,6 +97,20 @@ router.post('/upload', requirePassword, upload.any(), handleMulterError, async (
             rel_path: relPath,
             ...metadata
         });
+
+        // 检查是否覆盖了现有文件，如果是则清除 sharp 缓存
+        const forceOverwrite =
+            req.query.overwrite === "true" ||
+            req.body?.overwrite === "true" ||
+            req.query.overwrite === true ||
+            req.body?.overwrite === true;
+        if (forceOverwrite) {
+            try {
+                // 清除 sharp 缓存以确保下次访问读取新文件
+                sharp.cache(false);
+                sharp.cache(true);
+            } catch (e) { }
+        }
 
         try {
             let imageId = dbResult.lastInsertRowid;
