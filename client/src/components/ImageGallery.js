@@ -1295,6 +1295,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       // Clear input and state to prevent race conditions
       setPasswordInput("");
       setImages([]);
+      setSubdirs([]);
       setShowDirectOnly(false);
       setFolderGroupData(null);
       setHasMore(true);
