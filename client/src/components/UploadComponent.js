@@ -14,8 +14,9 @@ import {
   Grid,
   Tabs,
   Input,
+  Tooltip,
 } from "antd";
-import { InboxOutlined, CheckCircleOutlined, CloseOutlined, CopyOutlined } from "@ant-design/icons";
+import { InboxOutlined, CheckCircleOutlined, CloseOutlined, CopyOutlined, FolderAddOutlined } from "@ant-design/icons";
 import DirectorySelector from "./DirectorySelector";
 
 const { Dragger } = Upload;
@@ -43,6 +44,8 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
   // Separate list for currently completed session uploads to show in overlay
   const [sessionUploadedFiles, setSessionUploadedFiles] = useState([]);
   const [dir, setDir] = useState("");
+  const [newFolderPath, setNewFolderPath] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [config, setConfig] = useState({
     allowedExtensions: [
       ".jpg",
@@ -398,6 +401,27 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
+  const handleCreateFolder = async () => {
+    const folderPath = newFolderPath.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+    if (!folderPath) { message.warning("请输入文件夹路径"); return; }
+    if (folderPath.includes("..")) { message.error("路径不能包含 .."); return; }
+    setCreatingFolder(true);
+    try {
+      const resp = await api.post("/manage/create-folder", { path: folderPath });
+      if (resp.data.success) {
+        message.success(`文件夹 "${folderPath}" 创建成功`);
+        setNewFolderPath("");
+        setDir(folderPath); // 自动切换到新建的文件夹
+      } else {
+        message.error(resp.data.error || "创建失败");
+      }
+    } catch (e) {
+      message.error(e?.response?.data?.error || e.message || "创建失败");
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
   return (
     <div style={{ padding: isModal ? '24px' : 0 }}>
       <Title
@@ -427,6 +451,19 @@ const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
             color: isModal && !isDarkMode ? 'rgba(0,0,0,0.85)' : undefined
           }}
         />
+        {/* 新建文件夹 */}
+        <Tooltip title="支持嵌套路径，如 ZZZ/Events/NewFolder">
+          <Input.Search
+            prefix={<FolderAddOutlined style={{ opacity: 0.5 }} />}
+            placeholder="新建文件夹，如 ZZZ/SomeEvent"
+            value={newFolderPath}
+            onChange={e => setNewFolderPath(e.target.value)}
+            enterButton={<Button type="default" loading={creatingFolder} icon={<FolderAddOutlined />}>新建</Button>}
+            onSearch={handleCreateFolder}
+            onPressEnter={handleCreateFolder}
+            allowClear
+          />
+        </Tooltip>
       </Space>
 
       <Card

@@ -81,6 +81,25 @@ router.post('/sync', requirePassword, async (req, res) => {
     }
 });
 
+// ── 创建文件夹 ────────────────────────────────────────────────────────────────
+
+router.post('/create-folder', requirePassword, async (req, res) => {
+    try {
+        const rawPath = (req.body.path || '').trim().replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
+        if (!rawPath) return res.status(400).json({ success: false, error: '文件夹路径不能为空' });
+        if (rawPath.includes('..')) return res.status(400).json({ success: false, error: '非法路径' });
+
+        const targetPath = safeJoin(STORAGE_PATH, rawPath);
+        const exists = await fs.pathExists(targetPath);
+        if (exists) return res.status(409).json({ success: false, error: '文件夹已存在' });
+        await fs.ensureDir(targetPath);
+        res.json({ success: true, path: rawPath });
+    } catch (e) {
+        console.error('Create folder error:', e);
+        res.status(500).json({ success: false, error: e.message || '创建失败' });
+    }
+});
+
 // ── 相册密码 ──────────────────────────────────────────────────────────────────
 
 router.post('/album/password', requirePassword, async (req, res) => {
