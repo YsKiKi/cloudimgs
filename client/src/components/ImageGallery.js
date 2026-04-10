@@ -2285,14 +2285,15 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
               {dir && dir.split("/").map((segment, idx, arr) => {
                 const pathUpTo = arr.slice(0, idx + 1).join("/");
                 const isLast = idx === arr.length - 1;
+                const isClickable = !isLast || showDirectOnly;
                 return (
                   <React.Fragment key={pathUpTo}>
                     <span style={{ opacity: 0.35, margin: "0 2px" }}>/</span>
                     <span
                       style={{
-                        cursor: isLast ? "default" : "pointer",
-                        color: isLast ? colorText : colorPrimary,
-                        fontWeight: isLast ? 600 : 500,
+                        cursor: isClickable ? "pointer" : "default",
+                        color: isClickable ? colorPrimary : colorText,
+                        fontWeight: !isClickable ? 600 : 500,
                         maxWidth: 160,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -2301,7 +2302,13 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                         verticalAlign: "middle",
                       }}
                       title={segment}
-                      onClick={() => { if (!isLast) setDir(pathUpTo); }}
+                      onClick={() => {
+                        if (isLast && showDirectOnly) {
+                          setShowDirectOnly(false);
+                        } else if (!isLast) {
+                          setDir(pathUpTo);
+                        }
+                      }}
                     >
                       {segment}
                     </span>
