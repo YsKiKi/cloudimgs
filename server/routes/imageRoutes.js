@@ -219,7 +219,75 @@ router.get('/map-data', requirePassword, async (req, res) => {
 
 router.get('/directories', requirePassword, async (req, res) => {
     try {
-        async function getDirectories(dir) {
+        const previewCount = Math.min(10, Math.max(1, parseInt(req.query.previewCount) || 3));
+        // showSubdirPreviews=false 时，若目录无直接图片则不回退到子孙图片
+        const showSubdirPreviews = req.query.showSubdirPreviews !== 'false';
+
+        // 根据策略为一个目录生成预览列表
+        function buildPreviews(relPath) {
+            const hasDirectImages = imageRepository.hasDirectImages(relPath);
+            let source;
+            if (hasDirectImages) {
+                // 有直接子图 → 只取直接子图
+                source = imageRepository.getDirectPreviews(relPath, previewCount);
+            } else if (showSubdirPreviews) {
+                // 无直接子图 + 允许显示子孙图片 → 回退到嵌套查询
+                source = imageRepository.getPreviews(relPath, previewCount);
+            } else {
+                return [];
+            }
+            return source.map(img => {
+                const encoded = img.rel_path.split('/').map(encodeURIComponent).join('/');
+                const previewEncoded = encoded.replace(/\.[^.]+$/, '.webp');
+                return `/api/images/preview/${previewEncoded}`;
+            });
+        }
+
+        // 获取单层直接子目录（不递归）
+        async function getDirectChildren(parentDir) {
+            const absDir = safeJoin(STORAGE_PATH, parentDir);
+            const results = [];
+            try {
+                const files = await fs.readdir(absDir);
+                for (const file of files) {
+                    if ([CACHE_DIR_NAME, CONFIG_DIR_NAME, TRASH_DIR_NAME].includes(file)) continue;
+                    if (file.startsWith('.')) continue;
+
+                    const filePath = path.join(absDir, file);
+                    const stats = await fs.stat(filePath);
+                    if (!stats.isDirectory()) continue;
+
+                    const relPath = (parentDir ? parentDir + '/' : '') + file;
+                    const isLocked = await isAlbumLocked(relPath);
+
+                    // 检查是否有子目录
+                    let hasChildren = false;
+                    try {
+                        const subFiles = await fs.readdir(filePath);
+                        for (const sub of subFiles) {
+                            if ([CACHE_DIR_NAME, CONFIG_DIR_NAME, TRASH_DIR_NAME].includes(sub)) continue;
+                            if (sub.startsWith('.')) continue;
+                            const subStat = await fs.stat(path.join(filePath, sub));
+                            if (subStat.isDirectory()) { hasChildren = true; break; }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    results.push({
+                        name: file,
+                        path: relPath,
+                        previews: isLocked ? [] : buildPreviews(relPath),
+                        locked: isLocked,
+                        imageCount: imageRepository.countByDir(relPath),
+                        mtime: stats.mtime,
+                        hasChildren
+                    });
+                }
+            } catch (e) { /* directory read error, skip */ }
+            return results;
+        }
+
+        // 递归获取全部子目录（扁平列表，用于相册管理器）
+        async function getAllDirectories(dir) {
             const absDir = safeJoin(STORAGE_PATH, dir);
             let results = [];
             try {
@@ -234,30 +302,32 @@ router.get('/directories', requirePassword, async (req, res) => {
 
                     const relPath = path.join(dir, file).replace(/\\/g, '/');
                     const isLocked = await isAlbumLocked(relPath);
-                    let previews = [];
-                    if (!isLocked) {
-                        previews = imageRepository.getPreviews(relPath, 3).map(img =>
-                            `/api/images/${img.rel_path.split('/').map(encodeURIComponent).join('/')}?w=400`
-                        );
-                    }
 
                     results.push({
                         name: file,
                         path: relPath,
-                        previews,
+                        previews: isLocked ? [] : buildPreviews(relPath),
                         locked: isLocked,
                         imageCount: imageRepository.countByDir(relPath),
                         mtime: stats.mtime
                     });
 
-                    const children = await getDirectories(relPath);
+                    const children = await getAllDirectories(relPath);
                     results = results.concat(children);
                 }
             } catch (e) { /* directory read error, skip */ }
             return results;
         }
 
-        res.json({ success: true, data: await getDirectories('') });
+        const parentParam = req.query.parent;
+        let data;
+        if (parentParam !== undefined) {
+            data = await getDirectChildren(parentParam.replace(/\\/g, '/'));
+        } else {
+            data = await getAllDirectories('');
+        }
+
+        res.json({ success: true, data });
     } catch (e) {
         console.error('List directories error:', e);
         res.status(500).json({ success: false, error: 'Failed to list directories' });

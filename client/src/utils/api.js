@@ -209,13 +209,10 @@ const mockAdapter = async (config) => {
         const newName = body.newName;
         // const newDir = body.newDir;
 
-        let updatedRelPath = originalRelPath;
         let updatedFilename = originalRelPath.split("/").pop();
 
         if (newName) {
           updatedFilename = newName;
-          const dir = originalRelPath.includes("/") ? originalRelPath.substring(0, originalRelPath.lastIndexOf("/")) : "";
-          updatedRelPath = dir ? `${dir}/${newName}` : newName;
         }
 
         resolve({

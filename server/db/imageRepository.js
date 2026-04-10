@@ -21,6 +21,20 @@ const getPreviewsQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? 
 const countImagesByDirQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%'");
 const getAllImagesByViewsQuery = db.prepare('SELECT * FROM images ORDER BY views DESC');
 
+// 直接子图查询（只取本层，不含子孙目录）
+const getDirectPreviewsInDirQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path LIKE ? || '/%' AND rel_path NOT LIKE ? || '/%/%' ORDER BY upload_time DESC LIMIT ?"
+);
+const getDirectPreviewsInRootQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path NOT LIKE '%/%' ORDER BY upload_time DESC LIMIT ?"
+);
+const countDirectImagesInDirQuery = db.prepare(
+    "SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%' AND rel_path NOT LIKE ? || '/%/%'"
+);
+const countDirectImagesInRootQuery = db.prepare(
+    "SELECT COUNT(*) as count FROM images WHERE rel_path NOT LIKE '%/%'"
+);
+
 // 分页查询 — DB 层面高效分页
 const paginateAllQuery = db.prepare('SELECT * FROM images ORDER BY upload_time DESC LIMIT ? OFFSET ?');
 const paginateByDirQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
@@ -82,6 +96,15 @@ module.exports = {
     },
     getPreviews: (dir, limit = 3) => getPreviewsQuery.all(dir, limit),
     countByDir: (dir) => countImagesByDirQuery.get(dir).count,
+    // 只含直接子图（不含子孙目录图片）
+    getDirectPreviews: (dir, limit = 3) => {
+        if (!dir) return getDirectPreviewsInRootQuery.all(limit);
+        return getDirectPreviewsInDirQuery.all(dir, dir, limit);
+    },
+    hasDirectImages: (dir) => {
+        if (!dir) return countDirectImagesInRootQuery.get().count > 0;
+        return countDirectImagesInDirQuery.get(dir, dir).count > 0;
+    },
     insertMany,
     transaction: (fn) => db.transaction(fn),
 

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Masonry,
   Button,
@@ -21,6 +21,7 @@ import {
   EditOutlined,
   SearchOutlined,
   FolderOutlined,
+  LockOutlined,
   MenuOutlined,
   ApiOutlined,
   CloudUploadOutlined,
@@ -29,7 +30,6 @@ import {
   CheckOutlined,
   CloseOutlined,
   AreaChartOutlined,
-  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { thumbHashToDataURL } from "thumbhash";
 import DirectorySelector from "./DirectorySelector";
@@ -586,16 +586,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   const { useBreakpoint } = Grid;
   const screens = useBreakpoint();
   const isMobile = !screens.md;
-  const isDark = theme.useToken().theme?.id === 1 || colorBgContainer === "#141414";
   const isDarkMode = colorBgContainer === "#141414" || colorBgContainer === "#000000" || colorBgContainer === "#1f1f1f";
-
-  // Helper to determine if a color is light or dark (returns true if light)
-  const isLightColor = (r, g, b) => {
-    // Calculate relative luminance using standard formula
-    // Y = 0.2126R + 0.7152G + 0.0722B
-    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-    return luminance > 0.6; // Threshold for considering it "light"
-  };
 
   // Define capsule styles based on theme
   const capsuleStyle = {
@@ -608,10 +599,12 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const [searchText, setSearchText] = useState("");
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewImage, setPreviewImage] = useState("");
-  const [previewTitle, setPreviewTitle] = useState("");
+  const [, setPreviewImage] = useState("");
+  const [, setPreviewTitle] = useState("");
   const [previewFile, setPreviewFile] = useState(null);
   const [dir, setDir] = useState("");
+  const [subdirs, setSubdirs] = useState([]);
+  const [, setSubdirsLoading] = useState(false);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
@@ -804,13 +797,12 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const loadMoreRef = useRef(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [isEditingName, setIsEditingName] = useState(false);
+  const [, setRenameValue] = useState("");
+  const [, setIsEditingName] = useState(false);
   const [imageMeta, setImageMeta] = useState(null);
-  const [metaLoading, setMetaLoading] = useState(false);
-  const [isEditingDir, setIsEditingDir] = useState(false);
-  const [dirValue, setDirValue] = useState("");
+  const [, setMetaLoading] = useState(false);
+  const [, setIsEditingDir] = useState(false);
+  const [, setDirValue] = useState("");
 
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState([]);
@@ -914,6 +906,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     });
 
     return () => cancelAnimationFrame(animationFrame);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionBox?.currentX, selectionBox?.currentY]);
 
   const groups = useMemo(() => {
@@ -976,6 +969,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   async function refreshAfterEdit(targetDir) {
     setCurrentPage(1);
     setHasMore(true);
+    // eslint-disable-next-line no-use-before-define
     await fetchImages(targetDir, 1, pageSize, searchText, false);
   }
 
@@ -1038,7 +1032,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       } catch (e) { }
       setEditorSaving(false);
     }
-  }, [editorFile, exportFromEditor, getDirFromRelPath, refreshAfterEdit, splitFilename, uploadEdited]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorFile, exportFromEditor, getDirFromRelPath, splitFilename, uploadEdited]);
 
   const handleSaveAs = useCallback(() => {
     if (!editorFile) return;
@@ -1104,11 +1099,12 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         }
       },
     });
-  }, [editorFile, exportFromEditor, getDirFromRelPath, refreshAfterEdit, splitFilename, uploadEdited]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorFile, exportFromEditor, getDirFromRelPath, splitFilename, uploadEdited]);
 
   // 分页相关状态
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(() => {
+  const [pageSize] = useState(() => {
     // 从localStorage读取分页大小，默认为10
     const savedPageSize = localStorage.getItem("imageGalleryPageSize");
     return savedPageSize ? parseInt(savedPageSize) : 10;
@@ -1245,6 +1241,30 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     }
   }, [dir]);
 
+  // 获取当前目录的直接子目录（用于画廊导航）
+  useEffect(() => {
+    let active = true;
+    const fetchSubdirs = async () => {
+      setSubdirsLoading(true);
+      try {
+        const previewCount = parseInt(localStorage.getItem("folderPreviewCount") || "3");
+        const showSubdirPreviews = localStorage.getItem("folderShowSubdirPreviews") !== "false";
+        const res = await api.get(
+          `/directories?parent=${encodeURIComponent(dir)}&previewCount=${previewCount}&showSubdirPreviews=${showSubdirPreviews}`
+        );
+        if (active && res.data.success) {
+          setSubdirs(res.data.data || []);
+        }
+      } catch (e) {
+        if (active) setSubdirs([]);
+      } finally {
+        if (active) setSubdirsLoading(false);
+      }
+    };
+    fetchSubdirs();
+    return () => { active = false; };
+  }, [dir, api, directoryRefreshKey]);
+
   useEffect(() => {
     if (!isInitialized.current) {
       fetchImages("", 1, pageSize, "");
@@ -1264,6 +1284,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         clearTimeout(searchTimerRef.current);
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, pageSize, searchText, isAuthenticated, refreshTrigger]);
 
   // 当搜索文本变化时重置到第一页
@@ -1278,6 +1299,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     if (currentPage > 1) {
       fetchImages(dir, currentPage, pageSize, searchText, true);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
 
   useEffect(() => {
@@ -1302,7 +1324,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, images.length]);
 
-  const [previewLocation, setPreviewLocation] = useState("");
+  const [, setPreviewLocation] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Effect for fetching address in Preview Modal
@@ -1534,6 +1556,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, isAuthenticated]); // Re-bind if dir changes so upload goes to correct dir
 
   // Global Drag & Drop Listeners
@@ -1585,6 +1608,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('drop', handleDrop);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, isAuthenticated]);
 
   const handleDelete = async (relPath) => {
@@ -1698,6 +1722,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       }
       pendingNavigateRef.current = null;
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [images.length, loadingMore]);
 
   // Keyboard navigation
@@ -1709,6 +1734,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewVisible, previewIndex, images]);
 
   const handleDownload = (file) => {
@@ -1751,16 +1777,6 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       document.body.removeChild(input);
       message.error("当前浏览器不支持复制功能");
     }
-  };
-
-  // Helper to distribute items into columns
-  const getColumns = (items) => {
-    const columnsCount = isMobile ? 2 : screens.xl ? 5 : screens.lg ? 4 : screens.md ? 3 : 2;
-    const columns = Array.from({ length: columnsCount }, () => []);
-    items.forEach((item, index) => {
-      columns[index % columnsCount].push(item);
-    });
-    return columns;
   };
 
   const handlePasswordSubmit = () => {
@@ -2148,12 +2164,195 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         </div>
       </div>
 
+      {/* 面包屑导航 + 子文件夹卡片 */}
+      {(dir || subdirs.length > 0) && (
+        <div style={{ marginBottom: 8, padding: "0 4px" }}>
+          {/* 面包屑 */}
+          {dir && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 4,
+              marginBottom: 20,
+              fontSize: 13,
+              color: colorTextSecondary
+            }}>
+              <span
+                style={{ cursor: "pointer", color: colorPrimary, fontWeight: 500 }}
+                onClick={() => setDir("")}
+              >全部</span>
+              {dir.split("/").map((segment, idx, arr) => {
+                const pathUpTo = arr.slice(0, idx + 1).join("/");
+                const isLast = idx === arr.length - 1;
+                return (
+                  <React.Fragment key={pathUpTo}>
+                    <span style={{ opacity: 0.35, margin: "0 2px" }}>/</span>
+                    <span
+                      style={{
+                        cursor: isLast ? "default" : "pointer",
+                        color: isLast ? colorText : colorPrimary,
+                        fontWeight: isLast ? 600 : 500,
+                        maxWidth: 160,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        display: "inline-block",
+                        verticalAlign: "middle",
+                      }}
+                      title={segment}
+                      onClick={() => { if (!isLast) setDir(pathUpTo); }}
+                    >
+                      {segment}
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 子文件夹卡片 */}
+          {subdirs.length > 0 && (
+            <div style={{ marginBottom: 32 }}>
+              {/* 分区标题 */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 12,
+                fontSize: 13,
+                fontWeight: 600,
+                opacity: 0.6,
+                letterSpacing: "0.5px",
+                textTransform: "uppercase",
+                color: colorTextSecondary,
+              }}>
+                <FolderOutlined />
+                <span>子文件夹</span>
+                <span style={{ fontWeight: 400, opacity: 0.7 }}>({subdirs.length})</span>
+              </div>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 10,
+              }}>
+                {subdirs.map(sub => (
+                  <div
+                    key={sub.path}
+                    onClick={() => setDir(sub.path)}
+                    title={sub.name}
+                    style={{
+                      cursor: "pointer",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      border: `1px solid ${isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.07)"}`,
+                      background: isDarkMode ? "rgba(255,255,255,0.03)" : "#fff",
+                      boxShadow: isDarkMode ? "none" : "0 1px 4px rgba(0,0,0,0.06)",
+                      transition: "box-shadow 0.2s, transform 0.15s",
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.boxShadow = isDarkMode
+                        ? "0 4px 20px rgba(0,0,0,0.4)"
+                        : "0 4px 16px rgba(0,0,0,0.12)";
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.boxShadow = isDarkMode ? "none" : "0 1px 4px rgba(0,0,0,0.06)";
+                      e.currentTarget.style.transform = "none";
+                    }}
+                  >
+                    {/* 预览图区域：等比马赛克拼贴 */}
+                    <div style={{
+                      height: 96,
+                      display: "grid",
+                      gridTemplateColumns: sub.previews?.length >= 3
+                        ? "1fr 1fr"
+                        : sub.previews?.length === 2
+                          ? "1fr 1fr"
+                          : "1fr",
+                      gap: 1,
+                      background: isDarkMode ? "#1a1a1a" : "#f0f0f0",
+                      position: "relative",
+                    }}>
+                      {sub.previews && sub.previews.length > 0 ? (
+                        <>
+                          {/* 左侧主图（2 或 3 张时占左半） */}
+                          <img
+                            src={sub.previews[0]}
+                            alt=""
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                            loading="lazy"
+                          />
+                          {/* 右侧：2 张时单图 / 3 张时上下各半 */}
+                          {sub.previews.length >= 3 && (
+                            <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 1, height: "100%" }}>
+                              <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+                              <img src={sub.previews[2]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+                            </div>
+                          )}
+                          {sub.previews.length === 2 && (
+                            <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+                          )}
+                        </>
+                      ) : (
+                        /* 无图片时的占位 */
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.25, gap: 4 }}>
+                          {sub.locked
+                            ? <LockOutlined style={{ fontSize: 24 }} />
+                            : <FolderOutlined style={{ fontSize: 28 }} />
+                          }
+                        </div>
+                      )}
+                      {/* 加密标识角标 */}
+                      {sub.locked && (
+                        <div style={{
+                          position: "absolute", top: 6, right: 6,
+                          background: "rgba(0,0,0,0.55)", borderRadius: 4,
+                          padding: "2px 5px", display: "flex", alignItems: "center", gap: 3,
+                          fontSize: 11, color: "#fff",
+                        }}>
+                          <LockOutlined style={{ fontSize: 10 }} />
+                        </div>
+                      )}
+                      {/* 有子文件夹的角标 */}
+                      {sub.hasChildren && (
+                        <div style={{
+                          position: "absolute", bottom: 5, right: 6,
+                          background: "rgba(0,0,0,0.45)", borderRadius: 4,
+                          padding: "1px 5px", fontSize: 10, color: "rgba(255,255,255,0.85)",
+                        }}>
+                          …
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 文件夹名称和计数 */}
+                    <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                      <div style={{
+                        fontWeight: 500, fontSize: 13,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        flex: 1,
+                      }}>
+                        {sub.name}
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.4, flexShrink: 0 }}>
+                        {sub.imageCount}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div style={{ textAlign: "center", padding: "100px 0" }}>
           <Spin size="large" />
         </div>
       ) : images.length === 0 ? (
-        <Empty description="暂无图片" style={{ marginTop: 100 }} />
+        <Empty description={subdirs.length > 0 ? "该目录下没有直接图片，请进入子文件夹查看" : "暂无图片"} style={{ marginTop: subdirs.length > 0 ? 24 : 100 }} />
       ) : (
         <>
           {groups.map((group) => (

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Upload,
   Button,
@@ -28,34 +28,6 @@ function sanitizeDir(input) {
   dir = dir.replace(/\/+/, "/"); // 合并多余斜杠
   return dir;
 }
-
-// 并发请求限制器
-class ConcurrencyLimiter {
-  constructor(limit) {
-    this.limit = limit;
-    this.active = 0;
-    this.queue = [];
-  }
-
-  add(task) {
-    return new Promise((resolve, reject) => {
-      this.queue.push(() => task().then(resolve).catch(reject));
-      this.next();
-    });
-  }
-
-  next() {
-    if (this.active < this.limit && this.queue.length > 0) {
-      const task = this.queue.shift();
-      this.active++;
-      task().finally(() => {
-        this.active--;
-        this.next();
-      });
-    }
-  }
-}
-const uploadLimiter = new ConcurrencyLimiter(5); // 限制并发数为5
 
 const UploadComponent = ({ onUploadSuccess, api, isModal }) => {
   const {

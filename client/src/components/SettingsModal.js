@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Modal, Form, InputNumber, Divider, Typography, Space, message, theme, Radio, Switch } from "antd";
-import { CloudUploadOutlined, DeleteOutlined, FileOutlined } from "@ant-design/icons";
+import { CloudUploadOutlined, DeleteOutlined, FileOutlined, FolderOutlined } from "@ant-design/icons";
 
 const { Title, Text } = Typography;
 
@@ -15,11 +15,15 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
       const savedConcurrency = localStorage.getItem("uploadConcurrency");
       const savedUseTrash = localStorage.getItem("useTrash");
       const savedDuplicateStrategy = localStorage.getItem("duplicateStrategy");
+      const savedFolderPreviewCount = localStorage.getItem("folderPreviewCount");
+      const savedFolderShowSubdirPreviews = localStorage.getItem("folderShowSubdirPreviews");
       
       form.setFieldsValue({
         uploadConcurrency: savedConcurrency ? parseInt(savedConcurrency) : 3,
-        useTrash: savedUseTrash !== null ? savedUseTrash === "true" : true, // 默认使用回收站
-        duplicateStrategy: savedDuplicateStrategy || "timestamp", // 默认timestamp
+        useTrash: savedUseTrash !== null ? savedUseTrash === "true" : true,
+        duplicateStrategy: savedDuplicateStrategy || "timestamp",
+        folderPreviewCount: savedFolderPreviewCount ? parseInt(savedFolderPreviewCount) : 3,
+        folderShowSubdirPreviews: savedFolderShowSubdirPreviews !== null ? savedFolderShowSubdirPreviews === "true" : true,
       });
     }
   }, [visible, form]);
@@ -33,6 +37,8 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
       localStorage.setItem("uploadConcurrency", values.uploadConcurrency.toString());
       localStorage.setItem("useTrash", values.useTrash.toString());
       localStorage.setItem("duplicateStrategy", values.duplicateStrategy);
+      localStorage.setItem("folderPreviewCount", values.folderPreviewCount.toString());
+      localStorage.setItem("folderShowSubdirPreviews", values.folderShowSubdirPreviews.toString());
       
       message.success("设置已保存");
       
@@ -49,9 +55,11 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
 
   const handleReset = () => {
     form.setFieldsValue({
-      uploadConcurrency: 3, // 默认并发3
-      useTrash: true, // 默认使用回收站
-      duplicateStrategy: "timestamp", // 默认timestamp
+      uploadConcurrency: 3,
+      useTrash: true,
+      duplicateStrategy: "timestamp",
+      folderPreviewCount: 3,
+      folderShowSubdirPreviews: true,
     });
   };
 
@@ -192,6 +200,35 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
 
           <Text type="secondary" style={{ fontSize: 12 }}>
             💡 提示：若使用"永久删除"模式 + "直接覆盖"策略，删除后重传同名文件不会添加后缀。
+          </Text>
+
+          <Divider orientation="left">
+            <Space>
+              <FolderOutlined />
+              <Text strong>文件夹预览设置</Text>
+            </Space>
+          </Divider>
+
+          <Form.Item
+            name="folderPreviewCount"
+            label="预览图数量"
+            tooltip="文件夹卡片中最多显示几张预览图（1-5 张）"
+            rules={[{ required: true, message: "请输入数量" }, { type: "number", min: 1, max: 5, message: "范围 1-5" }]}
+          >
+            <InputNumber min={1} max={5} step={1} addonAfter="张" style={{ width: "100%" }} />
+          </Form.Item>
+
+          <Form.Item
+            name="folderShowSubdirPreviews"
+            label="显示子孙文件夹的图片"
+            tooltip="关闭后，若文件夹本身无直接图片，则不展示来自子孙文件夹的预览图"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
+          </Form.Item>
+
+          <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: -16, marginBottom: 16 }}>
+            说明：若文件夹内存在直接图片，始终优先显示直接图片的预览，不受此开关影响。
           </Text>
 
           <Divider />

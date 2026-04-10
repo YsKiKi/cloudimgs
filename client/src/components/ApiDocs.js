@@ -3,7 +3,6 @@ import { Typography, Card, Collapse, Tag, Divider, theme, Button, message, Toolt
 import {
   FileImageOutlined,
   FolderOutlined,
-  InfoCircleOutlined,
   CopyOutlined,
   FileTextOutlined,
   LockOutlined,
