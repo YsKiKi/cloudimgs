@@ -432,7 +432,22 @@ function normalizeResponseData(body) {
   if (Array.isArray(d)) {
     d.forEach(normalizeImageFields);
   } else if (d && typeof d === 'object') {
+    // 先尝试直接标准化（单个图片对象）
     normalizeImageFields(d);
+    // 递归处理嵌套的数组字段（如 by-folder 接口的 directImages / folderGroups）
+    for (const val of Object.values(d)) {
+      if (Array.isArray(val)) {
+        val.forEach(item => {
+          normalizeImageFields(item);
+          // 处理 folderGroups[].items 等嵌套数组
+          if (item && typeof item === 'object') {
+            for (const v2 of Object.values(item)) {
+              if (Array.isArray(v2)) v2.forEach(normalizeImageFields);
+            }
+          }
+        });
+      }
+    }
   }
 }
 

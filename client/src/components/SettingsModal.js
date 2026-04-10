@@ -22,7 +22,7 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
         uploadConcurrency: savedConcurrency ? parseInt(savedConcurrency) : 3,
         useTrash: savedUseTrash !== null ? savedUseTrash === "true" : true,
         duplicateStrategy: savedDuplicateStrategy || "timestamp",
-        folderPreviewCount: savedFolderPreviewCount ? parseInt(savedFolderPreviewCount) : 3,
+        folderPreviewCount: savedFolderPreviewCount ? parseInt(savedFolderPreviewCount) : 20,
         folderShowSubdirPreviews: savedFolderShowSubdirPreviews !== null ? savedFolderShowSubdirPreviews === "true" : true,
       });
     }
@@ -58,7 +58,7 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
       uploadConcurrency: 3,
       useTrash: true,
       duplicateStrategy: "timestamp",
-      folderPreviewCount: 3,
+      folderPreviewCount: 20,
       folderShowSubdirPreviews: true,
     });
   };
@@ -211,11 +211,11 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
 
           <Form.Item
             name="folderPreviewCount"
-            label="预览图数量"
-            tooltip="文件夹卡片中最多显示几张预览图（1-5 张）"
-            rules={[{ required: true, message: "请输入数量" }, { type: "number", min: 1, max: 5, message: "范围 1-5" }]}
+            label="文件夹图片总数上限"
+            tooltip="浏览含子文件夹的目录时，所有子文件夹共显示的图片总数上限，自动平均分配到各子文件夹"
+            rules={[{ required: true, message: "请输入数量" }, { type: "number", min: 3, max: 200, message: "范围 3-200" }]}
           >
-            <InputNumber min={1} max={5} step={1} addonAfter="张" style={{ width: "100%" }} />
+            <InputNumber min={3} max={200} step={1} addonAfter="张" style={{ width: "100%" }} />
           </Form.Item>
 
           <Form.Item
@@ -228,7 +228,7 @@ const SettingsModal = ({ visible, onClose, isDarkMode }) => {
           </Form.Item>
 
           <Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: -16, marginBottom: 16 }}>
-            说明：若文件夹内存在直接图片，始终优先显示直接图片的预览，不受此开关影响。
+            说明：浏览含子文件夹的目录时，此数量会平均分配到各子文件夹，超出后显示「查看更多」按钮。
           </Text>
 
           <Divider />

@@ -606,6 +606,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   const [subdirs, setSubdirs] = useState([]);
   const [, setSubdirsLoading] = useState(false);
   const [images, setImages] = useState([]);
+  const [folderGroupData, setFolderGroupData] = useState(null); // { directImages, folderGroups } from server
+  const [showDirectOnly, setShowDirectOnly] = useState(false); // 仅查看当前目录直接图片
   const [loading, setLoading] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
   const [hoverLocation, setHoverLocation] = useState("");
@@ -909,7 +911,58 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionBox?.currentX, selectionBox?.currentY]);
 
+  // 从候选图片中选取 count 张，使其在瀑布流中底部高度差最小（近似矩形）
+  const selectRectImages = useCallback((candidates, count) => {
+    if (candidates.length <= count) return candidates;
+    // 计算每张图片的宽高比，没有宽高信息的默认 1
+    const withRatio = candidates.map((img, idx) => ({
+      img,
+      idx,
+      ratio: (img.width && img.height) ? img.width / img.height : 1,
+    }));
+    // 按宽高比排序，选取中位数附近 count 张，这样宽高比最接近，瀑布流高度最均匀
+    withRatio.sort((a, b) => a.ratio - b.ratio);
+    const medianStart = Math.max(0, Math.floor((withRatio.length - count) / 2));
+    const selected = withRatio.slice(medianStart, medianStart + count);
+    // 恢复原始顺序（按上传时间）
+    selected.sort((a, b) => a.idx - b.idx);
+    return selected.map(s => s.img);
+  }, []);
+
   const groups = useMemo(() => {
+    // 有子文件夹时，使用服务端按文件夹分组的数据（无需全量拉取）
+    if (subdirs.length > 0 && folderGroupData) {
+      const result = [];
+      // 当前目录的直接图片
+      if (folderGroupData.directImages && folderGroupData.directImages.length > 0) {
+        const directTotal = folderGroupData.directImagesTotalCount || folderGroupData.directImages.length;
+        result.push({
+          type: "folder-group",
+          folderName: "当前目录图片",
+          folderPath: dir, // 点击"查看更多"时进入无子文件夹的纯图片浏览
+          items: folderGroupData.directImages,
+          totalCount: directTotal,
+          hasMore: directTotal > folderGroupData.directImages.length,
+          isDirectImages: true,
+        });
+      }
+      // 子文件夹分组
+      for (const fg of (folderGroupData.folderGroups || [])) {
+        if (fg.items && fg.items.length > 0) {
+          result.push({
+            type: "folder-group",
+            folderName: fg.folderName,
+            folderPath: fg.folderPath,
+            items: selectRectImages(fg.items, fg.items.length),
+            totalCount: fg.totalCount,
+            hasMore: fg.hasMore,
+          });
+        }
+      }
+      return result;
+    }
+
+    // 无子文件夹或数据未加载时，按日期分组
     const map = new Map();
     for (const img of images) {
       const key = dayjs(img.uploadTime).format("YYYY年MM月DD日");
@@ -920,8 +973,17 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     const dates = Array.from(map.keys()).sort(
       (a, b) => dayjs(b).valueOf() - dayjs(a).valueOf()
     );
-    return dates.map((d) => ({ date: d, items: map.get(d) }));
-  }, [images]);
+    return dates.map((d) => ({ type: "date-group", date: d, items: map.get(d) }));
+  }, [images, subdirs, folderGroupData, selectRectImages]);
+
+  // 所有当前显示的图片的平铺列表（用于预览导航）
+  const displayedImages = useMemo(() => {
+    const all = [];
+    for (const g of groups) {
+      all.push(...g.items);
+    }
+    return all.length > 0 ? all : images;
+  }, [groups, images]);
 
   const getEditorDefaults = useCallback((file) => {
     const filename = file?.filename || "image";
@@ -1139,6 +1201,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         pageSize: targetPageSize,
         ...(targetSearch && { search: targetSearch }),
         ...(targetDir && { dir: targetDir }),
+        ...(showDirectOnly && { directOnly: "true" }),
       };
 
       // Magic Search Branch
@@ -1232,6 +1295,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       // Clear input and state to prevent race conditions
       setPasswordInput("");
       setImages([]);
+      setShowDirectOnly(false);
+      setFolderGroupData(null);
       setHasMore(true);
       setCurrentPage(1);
       setPendingDir(null);
@@ -1247,7 +1312,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     const fetchSubdirs = async () => {
       setSubdirsLoading(true);
       try {
-        const previewCount = parseInt(localStorage.getItem("folderPreviewCount") || "3");
+        const previewCount = 3; // 子文件夹卡片预览图固定为3张（马赛克布局）
         const showSubdirPreviews = localStorage.getItem("folderShowSubdirPreviews") !== "false";
         const res = await api.get(
           `/directories?parent=${encodeURIComponent(dir)}&previewCount=${previewCount}&showSubdirPreviews=${showSubdirPreviews}`
@@ -1264,6 +1329,40 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     fetchSubdirs();
     return () => { active = false; };
   }, [dir, api, directoryRefreshKey]);
+
+  // 当有子文件夹时，按文件夹分组获取预览图片（不再全量拉取）
+  useEffect(() => {
+    if (subdirs.length === 0 || showDirectOnly) {
+      setFolderGroupData(null);
+      return;
+    }
+    let active = true;
+    const fetchFolderPreviews = async () => {
+      setLoading(true);
+      try {
+        const totalLimit = parseInt(localStorage.getItem("folderPreviewCount") || "20");
+        const folders = subdirs.map(s => ({ path: s.path, name: s.name }));
+        const headers = {};
+        if (dir && albumPasswords[dir]) {
+          headers["x-album-password"] = albumPasswords[dir];
+        }
+        const res = await api.get("/images/by-folder", {
+          params: { dir, totalLimit, folders: JSON.stringify(folders) },
+          headers,
+        });
+        if (active && res.data.success) {
+          setFolderGroupData(res.data.data);
+        }
+      } catch (e) {
+        if (active) setFolderGroupData(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchFolderPreviews();
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subdirs, dir, api, refreshTrigger, showDirectOnly]);
 
   useEffect(() => {
     if (!isInitialized.current) {
@@ -1285,7 +1384,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir, pageSize, searchText, isAuthenticated, refreshTrigger]);
+  }, [dir, pageSize, searchText, isAuthenticated, refreshTrigger, showDirectOnly]);
 
   // 当搜索文本变化时重置到第一页
   useEffect(() => {
@@ -1313,7 +1412,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
           hasMore &&
           !loading &&
           !loadingMore &&
-          images.length > 0
+          images.length > 0 &&
+          !folderGroupData // 文件夹分组模式下不触发无限滚动
         ) {
           setCurrentPage((p) => p + 1);
         }
@@ -1322,7 +1422,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, images.length]);
+  }, [hasMore, loading, loadingMore, images.length, folderGroupData]);
 
   const [, setPreviewLocation] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1660,9 +1760,9 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   };
 
   const handlePreview = (file) => {
-    // Find index in current images list
-    const index = images.findIndex(img => img.relPath === file.relPath);
-    setPreviewIndex(index);
+    // Find index in displayed images list
+    const index = displayedImages.findIndex(img => img.relPath === file.relPath);
+    setPreviewIndex(index >= 0 ? index : 0);
     setPreviewImage(getCacheBustedUrl(file));
     setPreviewVisible(true);
     setPreviewTitle(file.filename);
@@ -1698,9 +1798,9 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   };
 
   const showNext = () => {
-    if (previewIndex < images.length - 1) {
-      handlePreview(images[previewIndex + 1]);
-    } else if (hasMore && !loadingMore) {
+    if (previewIndex < displayedImages.length - 1) {
+      handlePreview(displayedImages[previewIndex + 1]);
+    } else if (hasMore && !loadingMore && !folderGroupData) {
       // Reached the end of loaded images but more are available, trigger load more
       setCurrentPage((p) => p + 1);
       pendingNavigateRef.current = 'next';
@@ -1709,7 +1809,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
 
   const showPrev = () => {
     if (previewIndex > 0) {
-      handlePreview(images[previewIndex - 1]);
+      handlePreview(displayedImages[previewIndex - 1]);
     }
   };
 
@@ -1717,13 +1817,13 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   useEffect(() => {
     if (pendingNavigateRef.current === 'next' && previewVisible && !loadingMore) {
       // Images list has been updated and loading is complete, navigate to next
-      if (previewIndex < images.length - 1) {
-        handlePreview(images[previewIndex + 1]);
+      if (previewIndex < displayedImages.length - 1) {
+        handlePreview(displayedImages[previewIndex + 1]);
       }
       pendingNavigateRef.current = null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images.length, loadingMore]);
+  }, [displayedImages.length, loadingMore]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -2168,7 +2268,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       {(dir || subdirs.length > 0) && (
         <div style={{ marginBottom: 8, padding: "0 4px" }}>
           {/* 面包屑 */}
-          {dir && (
+          {(dir || showDirectOnly) && (
             <div style={{
               display: "flex",
               alignItems: "center",
@@ -2180,9 +2280,9 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
             }}>
               <span
                 style={{ cursor: "pointer", color: colorPrimary, fontWeight: 500 }}
-                onClick={() => setDir("")}
+                onClick={() => { setDir(""); setShowDirectOnly(false); }}
               >全部</span>
-              {dir.split("/").map((segment, idx, arr) => {
+              {dir && dir.split("/").map((segment, idx, arr) => {
                 const pathUpTo = arr.slice(0, idx + 1).join("/");
                 const isLast = idx === arr.length - 1;
                 return (
@@ -2208,11 +2308,22 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                   </React.Fragment>
                 );
               })}
+              {showDirectOnly && (
+                <>
+                  {dir && <span style={{ opacity: 0.35, margin: "0 2px" }}>/</span>}
+                  <span
+                    style={{ cursor: "pointer", color: colorPrimary, fontWeight: 500 }}
+                    onClick={() => setShowDirectOnly(false)}
+                  >
+                    当前目录图片 ✕
+                  </span>
+                </>
+              )}
             </div>
           )}
 
           {/* 子文件夹卡片 */}
-          {subdirs.length > 0 && (
+          {subdirs.length > 0 && !showDirectOnly && (
             <div style={{ marginBottom: 32 }}>
               {/* 分区标题 */}
               <div style={{
@@ -2245,6 +2356,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                       cursor: "pointer",
                       borderRadius: 10,
                       overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column",
                       border: `1px solid ${isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.07)"}`,
                       background: isDarkMode ? "rgba(255,255,255,0.03)" : "#fff",
                       boxShadow: isDarkMode ? "none" : "0 1px 4px rgba(0,0,0,0.06)",
@@ -2265,14 +2378,14 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                     <div style={{
                       height: 96,
                       display: "grid",
-                      gridTemplateColumns: sub.previews?.length >= 3
+                      gridTemplateColumns: sub.previews?.length >= 2
                         ? "1fr 1fr"
-                        : sub.previews?.length === 2
-                          ? "1fr 1fr"
-                          : "1fr",
+                        : "1fr",
                       gap: 1,
                       background: isDarkMode ? "#1a1a1a" : "#f0f0f0",
                       position: "relative",
+                      overflow: "hidden",
+                      flexShrink: 0,
                     }}>
                       {sub.previews && sub.previews.length > 0 ? (
                         <>
@@ -2280,18 +2393,18 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                           <img
                             src={sub.previews[0]}
                             alt=""
-                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 0, minWidth: 0 }}
                             loading="lazy"
                           />
                           {/* 右侧：2 张时单图 / 3 张时上下各半 */}
                           {sub.previews.length >= 3 && (
-                            <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 1, height: "100%" }}>
-                              <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
-                              <img src={sub.previews[2]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+                            <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 1, height: "100%", overflow: "hidden" }}>
+                              <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 0, minWidth: 0 }} loading="lazy" />
+                              <img src={sub.previews[2]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 0, minWidth: 0 }} loading="lazy" />
                             </div>
                           )}
                           {sub.previews.length === 2 && (
-                            <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} loading="lazy" />
+                            <img src={sub.previews[1]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", minHeight: 0, minWidth: 0 }} loading="lazy" />
                           )}
                         </>
                       ) : (
@@ -2327,11 +2440,11 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                     </div>
 
                     {/* 文件夹名称和计数 */}
-                    <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                    <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, position: "relative", zIndex: 1, background: isDarkMode ? "rgba(255,255,255,0.03)" : "#fff" }}>
                       <div style={{
                         fontWeight: 500, fontSize: 13,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        flex: 1,
+                        flex: 1, minWidth: 0,
                       }}>
                         {sub.name}
                       </div>
@@ -2351,25 +2464,67 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         <div style={{ textAlign: "center", padding: "100px 0" }}>
           <Spin size="large" />
         </div>
-      ) : images.length === 0 ? (
+      ) : (groups.length === 0 && images.length === 0) ? (
         <Empty description={subdirs.length > 0 ? "该目录下没有直接图片，请进入子文件夹查看" : "暂无图片"} style={{ marginTop: subdirs.length > 0 ? 24 : 100 }} />
       ) : (
         <>
           {groups.map((group) => (
-            <div key={group.date} style={{ marginBottom: 24 }}>
+            <div key={group.folderPath || group.date} style={{ marginBottom: 24 }}>
               <div
                 style={{
                   marginBottom: 16,
                   paddingLeft: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <div style={{
                   opacity: 0.8,
                   fontWeight: 600,
                   fontSize: "13px",
                   letterSpacing: "0.5px",
                   textTransform: "uppercase",
-                  color: colorTextSecondary, // Applied theme color
-                }}
-              >
-                {group.date}
+                  color: colorTextSecondary,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}>
+                  {group.type === "folder-group" && <FolderOutlined style={{ fontSize: 13 }} />}
+                  {group.type === "folder-group" ? group.folderName : group.date}
+                  {group.type === "folder-group" && (
+                    <span style={{ fontWeight: 400, opacity: 0.6, fontSize: 12 }}>
+                      ({group.totalCount})
+                    </span>
+                  )}
+                </div>
+                {group.type === "folder-group" && group.hasMore && (
+                  <span
+                    onClick={() => {
+                      if (group.isDirectImages) {
+                        // 当前目录直接图片 → 切换到纯图片浏览模式
+                        setShowDirectOnly(true);
+                      } else {
+                        setDir(group.folderPath);
+                      }
+                    }}
+                    style={{
+                      fontSize: 12,
+                      color: colorPrimary,
+                      cursor: "pointer",
+                      opacity: 0.85,
+                      flexShrink: 0,
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = "0.85"; e.currentTarget.style.background = "transparent"; }}
+                  >
+                    查看更多 →
+                  </span>
+                )}
               </div>
 
               {/* Masonry Layout - with batch selection support */}
@@ -2379,7 +2534,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                 }
                 gutter={8}
                 items={group.items.map((imgItem, index) => ({
-                  key: imgItem.relPath || `item-${group.date}-${index}`,
+                  key: imgItem.relPath || `item-${group.folderPath || group.date}-${index}`,
                   data: imgItem,
                 }))}
                 itemRender={({ data: imgItem }) => (
@@ -2430,7 +2585,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         api={api}
         onNext={showNext}
         onPrev={showPrev}
-        hasNext={previewIndex < images.length - 1 || hasMore}
+        hasNext={previewIndex < displayedImages.length - 1 || (hasMore && !folderGroupData)}
         hasPrev={previewIndex > 0}
         onDelete={(relPath) => {
           handleDelete(relPath);

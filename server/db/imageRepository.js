@@ -18,6 +18,7 @@ const deleteImageByPath = db.prepare('DELETE FROM images WHERE rel_path = ?');
 const countImages = db.prepare('SELECT COUNT(*) as count FROM images');
 const getImagesByDir = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY upload_time DESC");
 const getPreviewsQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY upload_time DESC LIMIT ?");
+const getRandomPreviewsQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY RANDOM() LIMIT ?");
 const countImagesByDirQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%'");
 const getAllImagesByViewsQuery = db.prepare('SELECT * FROM images ORDER BY views DESC');
 
@@ -42,6 +43,14 @@ const countByDirSearchQuery = db.prepare("SELECT COUNT(*) as count FROM images W
 const paginateByDirSearchQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' AND filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
 const countAllSearchQuery = db.prepare("SELECT COUNT(*) as count FROM images WHERE filename LIKE '%' || ? || '%'");
 const paginateAllSearchQuery = db.prepare("SELECT * FROM images WHERE filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?");
+
+// 仅直接子图分页查询
+const paginateDirectInDirQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path LIKE ? || '/%' AND rel_path NOT LIKE ? || '/%/%' ORDER BY upload_time DESC LIMIT ? OFFSET ?"
+);
+const paginateDirectInRootQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path NOT LIKE '%/%' ORDER BY upload_time DESC LIMIT ? OFFSET ?"
+);
 const getRandomByDirQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY RANDOM() LIMIT 1");
 const getRandomAllQuery = db.prepare("SELECT * FROM images ORDER BY RANDOM() LIMIT 1");
 
@@ -95,6 +104,7 @@ module.exports = {
         return getImagesByDir.all(dir);
     },
     getPreviews: (dir, limit = 3) => getPreviewsQuery.all(dir, limit),
+    getRandomPreviews: (dir, limit = 3) => getRandomPreviewsQuery.all(dir, limit),
     countByDir: (dir) => countImagesByDirQuery.get(dir).count,
     // 只含直接子图（不含子孙目录图片）
     getDirectPreviews: (dir, limit = 3) => {
@@ -104,6 +114,10 @@ module.exports = {
     hasDirectImages: (dir) => {
         if (!dir) return countDirectImagesInRootQuery.get().count > 0;
         return countDirectImagesInDirQuery.get(dir, dir).count > 0;
+    },
+    countDirectImages: (dir) => {
+        if (!dir) return countDirectImagesInRootQuery.get().count;
+        return countDirectImagesInDirQuery.get(dir, dir).count;
     },
     insertMany,
     transaction: (fn) => db.transaction(fn),
@@ -128,6 +142,19 @@ module.exports = {
             const data = paginateAllQuery.all(pageSize, offset);
             return { data, total };
         }
+    },
+
+    // 仅直接子图分页
+    paginateDirect: (dir, page, pageSize) => {
+        const offset = (page - 1) * pageSize;
+        if (!dir) {
+            const total = countDirectImagesInRootQuery.get().count;
+            const data = paginateDirectInRootQuery.all(pageSize, offset);
+            return { data, total };
+        }
+        const total = countDirectImagesInDirQuery.get(dir, dir).count;
+        const data = paginateDirectInDirQuery.all(dir, dir, pageSize, offset);
+        return { data, total };
     },
 
     // 随机图片（DB 层）

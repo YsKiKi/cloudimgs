@@ -231,8 +231,8 @@ router.get('/directories', requirePassword, async (req, res) => {
                 // 有直接子图 → 只取直接子图
                 source = imageRepository.getDirectPreviews(relPath, previewCount);
             } else if (showSubdirPreviews) {
-                // 无直接子图 + 允许显示子孙图片 → 回退到嵌套查询
-                source = imageRepository.getPreviews(relPath, previewCount);
+                // 无直接子图 + 允许显示子孙图片 → 随机选取子孙图片
+                source = imageRepository.getRandomPreviews(relPath, previewCount);
             } else {
                 return [];
             }
@@ -334,6 +334,78 @@ router.get('/directories', requirePassword, async (req, res) => {
     }
 });
 
+// ── 按子文件夹分组获取预览图片 ────────────────────────────────────────────────
+
+router.get('/images/by-folder', requirePassword, async (req, res) => {
+    try {
+        const parentDir = (req.query.dir || '').replace(/\\/g, '/');
+        const totalLimit = Math.min(200, Math.max(1, parseInt(req.query.totalLimit) || 20));
+        const folders = req.query.folders ? JSON.parse(req.query.folders) : []; // [{path, name}]
+
+        if (!folders.length) {
+            return res.json({ success: true, data: { directImages: [], folderGroups: [] } });
+        }
+
+        // 先获取当前目录的直接图片
+        const directImagesTotalCount = imageRepository.countDirectImages(parentDir);
+        const directImages = parentDir
+            ? imageRepository.getDirectPreviews(parentDir, totalLimit)
+            : imageRepository.getDirectPreviews('', totalLimit);
+
+        // 平均分配每个子文件夹的配额
+        const folderCount = folders.length;
+        const perFolder = Math.max(1, Math.floor(totalLimit / folderCount));
+        let remainder = totalLimit % folderCount;
+
+        const folderGroups = [];
+        for (const folder of folders) {
+            const quota = perFolder + (remainder > 0 ? 1 : 0);
+            if (remainder > 0) remainder--;
+
+            // 检查是否加密
+            const isLocked = await isAlbumLocked(folder.path);
+            if (isLocked) {
+                const albumPassword = req.headers['x-album-password'];
+                if (!albumPassword || !(await verifyAlbumPassword(folder.path, albumPassword))) {
+                    folderGroups.push({
+                        folderName: folder.name,
+                        folderPath: folder.path,
+                        items: [],
+                        totalCount: 0,
+                        hasMore: false,
+                        locked: true,
+                    });
+                    continue;
+                }
+            }
+
+            const totalCount = imageRepository.countByDir(folder.path);
+            const images = imageRepository.getPreviews(folder.path, quota);
+
+            folderGroups.push({
+                folderName: folder.name,
+                folderPath: folder.path,
+                items: images.map(img => formatImageResponse(req, img)),
+                totalCount,
+                hasMore: totalCount > quota,
+            });
+        }
+
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({
+            success: true,
+            data: {
+                directImages: directImages.map(img => formatImageResponse(req, img)),
+                directImagesTotalCount,
+                folderGroups,
+            },
+        });
+    } catch (e) {
+        console.error('Images by folder error:', e);
+        res.status(500).json({ success: false, error: 'Failed to get folder images' });
+    }
+});
+
 // ── 图片列表 ──────────────────────────────────────────────────────────────────
 
 router.get('/images', requirePassword, async (req, res) => {
@@ -342,6 +414,7 @@ router.get('/images', requirePassword, async (req, res) => {
         const page = Math.max(1, parseInt(req.query.page) || 1);
         const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize) || 10));
         const search = req.query.search || '';
+        const directOnly = req.query.directOnly === 'true';
 
         if (dir && await isAlbumLocked(dir)) {
             const albumPassword = req.headers['x-album-password'];
@@ -359,10 +432,15 @@ router.get('/images', requirePassword, async (req, res) => {
                 allImages = allImages.filter(img => img.filename.toLowerCase().includes(search.toLowerCase()));
             }
             allImages = allImages.filter(img => !lockedDirs.some(lockedDir => img.rel_path.startsWith(lockedDir + '/')));
+            if (directOnly) {
+                allImages = allImages.filter(img => !img.rel_path.includes('/'));
+            }
             const total = allImages.length;
             const startIndex = (page - 1) * pageSize;
             const paginated = allImages.slice(startIndex, startIndex + pageSize);
             paginateResult = { data: paginated, total };
+        } else if (directOnly) {
+            paginateResult = imageRepository.paginateDirect(dir, page, pageSize);
         } else {
             paginateResult = imageRepository.paginate(dir, search, page, pageSize);
         }
