@@ -2,31 +2,8 @@ name: Docker Publish
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to publish"
-        required: true
-        default: "latest"
-      registry:
-        description: "Registry to publish to"
-        required: false
-        default: "dockerhub"
-        type: choice
-        options:
-          - dockerhub
-      platforms:
-        description: "Target platforms"
-        required: true
-        default: "linux/amd64,linux/arm64"
-        type: choice
-        options:
-          - linux/amd64
-          - linux/amd64,linux/arm64
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -66,20 +43,15 @@ jobs:
           IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/cloudimgs"
           echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
           
-          # Generate tags based on event type
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            echo "tags=${IMAGE_NAME}:${VERSION}-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-            echo "tags=${IMAGE_NAME}:main-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
-            BRANCH=${GITHUB_REF#refs/heads/}
-            echo "tags=${IMAGE_NAME}:${BRANCH}-${{ matrix.arch }}" >> $GITHUB_OUTPUT
-          else
-            echo "tags=${IMAGE_NAME}:${{ github.sha }}-${{ matrix.arch }}" >> $GITHUB_OUTPUT
-          fi
+          # Extract version from git tag (remove 'refs/tags/v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Support full semantic versioning including prerelease (e.g., v1.2.3-rc.1, v1.2.3-alpha)
+          echo "tags=${IMAGE_NAME}:${VERSION}-${{ matrix.arch }},${IMAGE_NAME}:latest-${{ matrix.arch }}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
           
           echo "Debug info:"
+          echo "- Version: ${VERSION}"
           echo "- Platform: ${{ matrix.platform }}"
           echo "- Arch: ${{ matrix.arch }}"
           echo "- Runner: ${{ matrix.runner }}"
@@ -116,23 +88,25 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Create and push multi-arch manifest
+        id: manifest
         run: |
           IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/cloudimgs"
           
+          # Extract version from git tag
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
           # Check which architectures are available
           AVAILABLE_ARCHS=()
-          if docker manifest inspect ${IMAGE_NAME}:main-amd64 >/dev/null 2>&1 || \
-             docker manifest inspect ${IMAGE_NAME}:latest-amd64 >/dev/null 2>&1 || \
-             docker buildx imagetools inspect ${IMAGE_NAME}:main-amd64 >/dev/null 2>&1; then
+          if docker manifest inspect ${IMAGE_NAME}:${VERSION}-amd64 >/dev/null 2>&1 || \
+             docker buildx imagetools inspect ${IMAGE_NAME}:${VERSION}-amd64 >/dev/null 2>&1; then
             AVAILABLE_ARCHS+=("amd64")
             echo "✅ amd64 image found"
           else
             echo "⚠️  amd64 image not found"
           fi
           
-          if docker manifest inspect ${IMAGE_NAME}:main-arm64 >/dev/null 2>&1 || \
-             docker manifest inspect ${IMAGE_NAME}:latest-arm64 >/dev/null 2>&1 || \
-             docker buildx imagetools inspect ${IMAGE_NAME}:main-arm64 >/dev/null 2>&1; then
+          if docker manifest inspect ${IMAGE_NAME}:${VERSION}-arm64 >/dev/null 2>&1 || \
+             docker buildx imagetools inspect ${IMAGE_NAME}:${VERSION}-arm64 >/dev/null 2>&1; then
             AVAILABLE_ARCHS+=("arm64")
             echo "✅ arm64 image found"
           else
@@ -155,52 +129,18 @@ jobs:
             echo "${images[@]}"
           }
           
-          # Generate manifest tags based on event type
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            
-            # Create version tag manifest
-            VERSION_IMAGES=($(build_image_list "${VERSION}"))
-            if [ ${#VERSION_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:${VERSION} "${VERSION_IMAGES[@]}"
-              echo "✅ Created manifest for ${VERSION} with: ${AVAILABLE_ARCHS[*]}"
-            fi
-            
-            # Create latest tag manifest
-            LATEST_IMAGES=($(build_image_list "latest"))
-            if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
-              echo "✅ Created manifest for latest with: ${AVAILABLE_ARCHS[*]}"
-            fi
-          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-            # main branch: create both main and latest manifests
-            MAIN_IMAGES=($(build_image_list "main"))
-            if [ ${#MAIN_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:main "${MAIN_IMAGES[@]}"
-              echo "✅ Created manifest for main with: ${AVAILABLE_ARCHS[*]}"
-            fi
-            
-            LATEST_IMAGES=($(build_image_list "latest"))
-            if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
-              echo "✅ Created manifest for latest with: ${AVAILABLE_ARCHS[*]}"
-            fi
-          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
-            BRANCH=${GITHUB_REF#refs/heads/}
-            
-            # Create branch tag manifest
-            BRANCH_IMAGES=($(build_image_list "${BRANCH}"))
-            if [ ${#BRANCH_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:${BRANCH} "${BRANCH_IMAGES[@]}"
-              echo "✅ Created manifest for ${BRANCH} with: ${AVAILABLE_ARCHS[*]}"
-            fi
-          else
-            # Create SHA tag manifest
-            SHA_IMAGES=($(build_image_list "${{ github.sha }}"))
-            if [ ${#SHA_IMAGES[@]} -gt 0 ]; then
-              docker buildx imagetools create -t ${IMAGE_NAME}:${{ github.sha }} "${SHA_IMAGES[@]}"
-              echo "✅ Created manifest for ${{ github.sha }} with: ${AVAILABLE_ARCHS[*]}"
-            fi
+          # Create version tag manifest (supports semantic versioning with prerelease)
+          VERSION_IMAGES=($(build_image_list "${VERSION}"))
+          if [ ${#VERSION_IMAGES[@]} -gt 0 ]; then
+            docker buildx imagetools create -t ${IMAGE_NAME}:${VERSION} "${VERSION_IMAGES[@]}"
+            echo "✅ Created manifest for ${VERSION} with: ${AVAILABLE_ARCHS[*]}"
+          fi
+          
+          # Create latest tag manifest
+          LATEST_IMAGES=($(build_image_list "latest"))
+          if [ ${#LATEST_IMAGES[@]} -gt 0 ]; then
+            docker buildx imagetools create -t ${IMAGE_NAME}:latest "${LATEST_IMAGES[@]}"
+            echo "✅ Created manifest for latest with: ${AVAILABLE_ARCHS[*]}"
           fi
 
       - name: Success notification
