@@ -51,6 +51,11 @@ async function generatePreview(originalPath, relPath) {
             return null;
         }
 
+        // 跳过 GIF 文件，避免使用 sharp 动态压缩破坏动画
+        if (ext === '.gif') {
+            return null;
+        }
+
         // 已经是webp的话，也可以选择生成压缩版本或直接跳过
         // 这里我们仍然为webp生成一个优化版本
         

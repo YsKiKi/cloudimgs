@@ -244,6 +244,9 @@ const ImageItem = ({
         {/* Real Image/Video Layer */}
         {(() => {
           const isVideo = /\.(mp4|webm)$/i.test(image.filename);
+          const isGif = /\.gif$/i.test(image.filename);
+          // GIF 使用原始文件路径，保留完整动画（与详情页策略一致）
+          const gifSrc = image.url.replace(/^\/api\/images\//, "/api/files/");
           if (isVideo) {
             return (
               <video
@@ -276,7 +279,7 @@ const ImageItem = ({
             <img
               ref={imgRef}
               alt={image.filename}
-              src={getImageSrc()}
+              src={isGif ? gifSrc : getImageSrc()}
               draggable={false}
               loading="lazy"
               onLoad={() => setLoaded(true)}
@@ -1630,9 +1633,45 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     }
   };
 
+  // Handle URL upload (e.g., from clipboard image URL)
+  const handleUploadFilesFromUrl = async (url) => {
+    if (!isAuthenticated) {
+      message.warning("请先登录");
+      return;
+    }
+    if (!url) return;
+
+    // Add to queue for UI feedback
+    const uid = `url-upload-${Date.now()}`;
+    const newQueueItem = {
+      uid,
+      name: url.split('/').pop() || 'url-image',
+      progress: 0,
+      status: 'uploading'
+    };
+    setUploadQueue(prev => [...prev, newQueueItem]);
+
+    try {
+      const response = await api.post('/upload-url', { url, dir });
+      if (response.data?.success) {
+        setUploadQueue(prev => prev.map(i => i.uid === uid ? { ...i, status: 'success', progress: 100 } : i));
+        setSessionUploadedFiles(prev => [...prev, response.data.data]);
+        message.success(`上传完成`);
+        setCurrentPage(1);
+        fetchImages(dir, 1, pageSize, searchText, false);
+      } else {
+        throw new Error(response.data?.error || '上传失败');
+      }
+    } catch (error) {
+      console.error('URL upload error:', error);
+      setUploadQueue(prev => prev.map(i => i.uid === uid ? { ...i, status: 'error', errorMsg: error.message || '上传出错' } : i));
+      message.error(error?.response?.data?.error || error.message || 'URL 上传失败');
+    }
+  };
+
   // Global Paste Event Listener
   useEffect(() => {
-    const handlePaste = (e) => {
+    const handlePaste = async (e) => {
       // Ignore paste if inside input/textarea
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return;
@@ -1642,6 +1681,8 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       if (!items) return;
 
       const files = [];
+      let imageUrl = null;
+
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image') !== -1) {
           const file = items[i].getAsFile();
@@ -1649,9 +1690,60 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         }
       }
 
+      // Check for image URL in text clipboard
+      if (files.length === 0) {
+        // Try getData first (more reliable for plain text URLs)
+        const plainText = e.clipboardData?.getData('text/plain');
+        const uriList = e.clipboardData?.getData('text/uri-list');
+
+        const textToCheck = uriList || plainText;
+
+        if (textToCheck) {
+          const imageExtPattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
+          const urlCandidates = textToCheck.split(/\r?\n/).filter(line => line.trim());
+          for (const text of urlCandidates) {
+            const trimmed = text.trim();
+            if (imageExtPattern.test(trimmed) && trimmed.match(/^https?:\/\//)) {
+              imageUrl = trimmed;
+              break;
+            }
+          }
+        }
+
+        // Fallback: iterate clipboard items
+        if (!imageUrl) {
+          const textItems = e.clipboardData?.items;
+          if (textItems) {
+            for (let i = 0; i < textItems.length; i++) {
+              if (textItems[i].type === 'text/plain' || textItems[i].type === 'text/uri-list') {
+                const text = await new Promise((resolve) => {
+                  textItems[i].getAsString((str) => resolve(str));
+                });
+                if (text) {
+                  const imageExtPattern = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
+                  const urlCandidates = text.split(/\r?\n/).filter(line => line.trim());
+                  for (const line of urlCandidates) {
+                    const trimmed = line.trim();
+                    if (imageExtPattern.test(trimmed) && trimmed.match(/^https?:\/\//)) {
+                      imageUrl = trimmed;
+                      break;
+                    }
+                  }
+                  if (imageUrl) break;
+                }
+              }
+            }
+          }
+        }
+      }
+
       if (files.length > 0) {
         e.preventDefault();
         handleUploadFiles(files);
+      } else if (imageUrl) {
+        e.preventDefault();
+        // Upload from URL
+        handleUploadFilesFromUrl(imageUrl);
       }
     };
 

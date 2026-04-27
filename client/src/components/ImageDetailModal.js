@@ -101,12 +101,41 @@ const ImageDetailModal = ({
   const [isEditingDir, setIsEditingDir] = useState(false);
   const [dirValue, setDirValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [moving, setMoving] = useState(false);
   const videoRef = useRef(null);
+  const scrollLockRef = useRef(null);
+  const touchStartXRef = useRef(null);
+  const touchStartYRef = useRef(null);
 
   const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  // Lock body scroll when modal is open
+  useEffect(() => {
+    if (visible) {
+      const scrollY = window.scrollY;
+      scrollLockRef.current = scrollY;
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+    } else {
+      const scrollY = scrollLockRef.current || 0;
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, scrollY);
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+    };
+  }, [visible]);
 
   // Reset state when file changes
   useEffect(() => {
@@ -332,17 +361,27 @@ const ImageDetailModal = ({
   const handleMove = async () => {
     const oldRel = file.relPath;
     try {
-      const res = await api.put(`/images/${encodePath(oldRel)}`, {
-        newDir: dirValue || "",
+      setMoving(true);
+      const res = await api.post("/batch/move", {
+        files: [oldRel],
+        targetDir: dirValue || "",
       });
       if (res.data?.success) {
-        const updated = res.data.data;
-        message.success("目录已更新");
-        setIsEditingDir(false);
-        if (onUpdate) onUpdate(updated);
+        const { successCount = 0, failCount = 0 } = res.data;
+        if (successCount > 0 && failCount === 0) {
+          message.success("已移动到: " + (dirValue || "根目录"));
+          setIsEditingDir(false);
+        } else {
+          message.error(res.data?.error || "移动失败");
+        }
+      } else {
+        message.error(res.data?.error || "移动失败");
       }
     } catch (e) {
-      message.error("移动失败");
+      const errMsg = e?.response?.data?.error || e?.response?.data?.message || e?.message || "移动失败";
+      message.error(errMsg);
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -395,6 +434,15 @@ const ImageDetailModal = ({
           padding: 0,
           background: "#000",
           boxShadow: "none",
+          height: "100vh",
+          overflow: "hidden",
+          borderRadius: 0,
+        },
+        wrapper: {
+          overflow: "hidden",
+        },
+        mask: {
+          touchAction: "none",
         },
         container: { padding: 0 }
       }}
@@ -405,6 +453,7 @@ const ImageDetailModal = ({
           display: "flex",
           height: "100vh",
           position: "relative",
+          overflow: "hidden",
         }}
       >
         {/* Close & Action Buttons */}
@@ -422,7 +471,21 @@ const ImageDetailModal = ({
             <Button
               shape="circle"
               icon={<CopyOutlined />}
-              onClick={() => copyToClipboard(window.location.origin + file.url)}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                copyToClipboard(window.location.origin + file.url);
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onTouchEnd={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                copyToClipboard(window.location.origin + file.url);
+              }}
               style={{
                 background: "rgba(0,0,0,0.5)",
                 border: "1px solid rgba(255,255,255,0.2)",
@@ -435,7 +498,21 @@ const ImageDetailModal = ({
           <Button
             shape="circle"
             icon={<span style={{ fontSize: 24, lineHeight: 1 }}>×</span>}
-            onClick={onCancel}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onCancel();
+            }}
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onCancel();
+            }}
             style={{
               background: "rgba(0,0,0,0.5)",
               border: "1px solid rgba(255,255,255,0.2)",
@@ -533,6 +610,25 @@ const ImageDetailModal = ({
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onTouchStart={(e) => {
+              touchStartXRef.current = e.touches[0].clientX;
+              touchStartYRef.current = e.touches[0].clientY;
+            }}
+            onTouchEnd={(e) => {
+              if (touchStartXRef.current === null) return;
+              const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+              const dy = e.changedTouches[0].clientY - touchStartYRef.current;
+              // 只有水平滑动幅度明显大于垂直时才切换（避免上下滑误触）
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && zoom === 1) {
+                if (dx < 0 && hasNext) {
+                  onNext();
+                } else if (dx > 0 && hasPrev) {
+                  onPrev();
+                }
+              }
+              touchStartXRef.current = null;
+              touchStartYRef.current = null;
+            }}
           >
             {/* Blurry Background */}
             <div
@@ -598,7 +694,12 @@ const ImageDetailModal = ({
                     pointerEvents: "none", // Let container handle events
                     opacity: imgLoaded ? 1 : 0,
                   }}
-                  src={file.url}
+                  src={
+                    // GIF 使用原始文件路径（保留完整动画），其他格式走 /api/images/（经过 sharp 处理）
+                    /\.gif$/i.test(file.filename)
+                      ? file.url.replace(/^\/api\/images\//, "/api/files/")
+                      : file.url
+                  }
                   draggable={false}
                 />
               </>
@@ -721,6 +822,7 @@ const ImageDetailModal = ({
                     type="primary"
                     ghost={!isLight}
                     size="small"
+                    loading={moving}
                     onClick={handleMove}
                   >
                     保存

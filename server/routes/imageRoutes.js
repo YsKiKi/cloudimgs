@@ -78,6 +78,16 @@ async function servePreviewImage(req, res, relPath) {
 
         getThumbHash(filePath).then(h => { if (!h) generateThumbHash(filePath); });
 
+        // GIF 文件直接返回原始文件以保留动画，不使用 sharp 动态压缩
+        const fileMime = (mime.lookup(filePath) || '').toLowerCase();
+        if (fileMime.includes('gif')) {
+            const stats = await fs.stat(filePath).catch(() => ({ size: 0 }));
+            recordStats(stats.size, relPath);
+            res.setHeader('Content-Type', 'image/gif');
+            res.setHeader('Cache-Control', 'public, max-age=31536000');
+            return res.sendFile(filePath);
+        }
+
         let previewPath = await previewService.getPreviewPath(relPath);
         if (!previewPath || !await fs.pathExists(previewPath)) {
             await previewService.generatePreview(filePath, relPath).catch(() => {});
