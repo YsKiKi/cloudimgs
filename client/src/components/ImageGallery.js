@@ -30,6 +30,8 @@ import {
   CheckOutlined,
   CloseOutlined,
   AreaChartOutlined,
+  ThunderboltOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { thumbHashToDataURL } from "thumbhash";
 import DirectorySelector from "./DirectorySelector";
@@ -37,6 +39,7 @@ import SvgToolModal from "./SvgToolModal";
 import AlbumManager from "./AlbumManager";
 import ImageDetailModal from "./ImageDetailModal";
 import ImageEditModal from "./ImageEditModal";
+import SettingsModal from "./SettingsModal";
 import dayjs from "dayjs";
 
 const { Title, Text } = Typography;
@@ -87,7 +90,8 @@ const ImageItem = ({
   isSelected,
   onToggleSelect,
   registerRef,
-  thumbnailWidth = 0
+  thumbnailWidth = 0,
+  imageRadius = 0,
 }) => {
   const [loaded, setLoaded] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -146,9 +150,9 @@ const ImageItem = ({
       style={{
         position: "relative",
         overflow: "hidden",
-        borderRadius: "0px",
+        borderRadius: imageRadius,
         boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-        transition: "transform 0.3s ease",
+        transition: "transform 0.3s ease, border-radius 0.25s ease",
         background: colorBgContainer,
         cursor: isBatchMode ? "default" : "zoom-in",
         transform: isBatchMode && isSelected ? "scale(0.95)" : "scale(1)",
@@ -582,7 +586,7 @@ const MagicIcon = ({ active }) => (
   </div>
 );
 
-const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigger, isBatchMode = false, selectedItems = new Set(), onSelectionChange = () => { } }) => {
+const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigger, isBatchMode = false, selectedItems = new Set(), onSelectionChange = () => { }, imageRadius = 0, currentTheme, onThemeChange, settings, onSettingsChange }) => {
   const {
     token: { colorBgContainer, colorPrimary, colorTextSecondary, colorText },
   } = theme.useToken();
@@ -616,6 +620,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   const [hoverLocation, setHoverLocation] = useState("");
   const [svgToolVisible, setSvgToolVisible] = useState(false);
   const [albumManagerVisible, setAlbumManagerVisible] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const [directoryRefreshKey, setDirectoryRefreshKey] = useState(0);
   const [copyModalVisible, setCopyModalVisible] = useState(false);
   const [copyTargetImage, setCopyTargetImage] = useState(null);
@@ -2331,6 +2336,24 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                 >
                   开放接口
                 </Button>
+                <Button
+                  type="text"
+                  icon={<SettingOutlined />}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setSettingsVisible(true);
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "center",
+                    height: 40,
+                    fontSize: 14
+                  }}
+                >
+                  设置
+                </Button>
                 {/* Future menu items can be added here */}
               </div>
             }
@@ -2660,6 +2683,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
                     }}
                     registerRef={registerRef}
                     thumbnailWidth={thumbnailWidth}
+                    imageRadius={imageRadius}
                   />
                 )}
               />
@@ -2720,6 +2744,15 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
         }}
         api={api}
         onSelectAlbum={(path) => setDir(path)}
+      />
+
+      <SettingsModal
+        open={settingsVisible}
+        onClose={() => setSettingsVisible(false)}
+        currentTheme={currentTheme}
+        onThemeChange={onThemeChange}
+        settings={settings}
+        onSettingsChange={onSettingsChange}
       />
 
       <CopyLinksModal />
