@@ -132,6 +132,28 @@ function App() {
     setMoveModalVisible(true);
   };
 
+  const handleBatchDownload = async () => {
+    if (selectedItems.size === 0) return;
+    const hide = message.loading("正在打包...", 0);
+    try {
+      const res = await api.post("/batch/download", {
+        files: Array.from(selectedItems),
+      }, { responseType: "blob" });
+      hide();
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cloudimgs_${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      hide();
+      message.error("打包下载失败，请重试");
+    }
+  };
+
   const confirmBatchMove = async () => {
     if (selectedItems.size === 0) return;
 
@@ -268,6 +290,7 @@ function App() {
                 selectedCount={selectedItems.size}
                 onBatchDelete={handleBatchDelete}
                 onBatchMove={handleBatchMove}
+                onBatchDownload={handleBatchDownload}
               />
             )}
 

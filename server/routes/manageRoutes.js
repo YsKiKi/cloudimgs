@@ -362,4 +362,59 @@ router.put('/images/*', requirePassword, async (req, res) => {
     }
 });
 
+// ── 批量打包下载 ──────────────────────────────────────────────────────────────
+
+router.post('/batch/download', requirePassword, async (req, res) => {
+    const { ZipArchive } = require('archiver');
+    try {
+        const { files } = req.body;
+        if (!Array.isArray(files) || files.length === 0) {
+            return res.status(400).json({ success: false, error: 'No files selected' });
+        }
+
+        // Validate all paths before starting the stream
+        const resolvedFiles = [];
+        for (const relPath of files) {
+            const decoded = decodeURIComponent(relPath).replace(/\\/g, '/');
+            const absPath = safeJoin(STORAGE_PATH, decoded);
+            if (await fs.pathExists(absPath)) {
+                resolvedFiles.push({ absPath, name: path.basename(decoded) });
+            }
+        }
+
+        if (resolvedFiles.length === 0) {
+            return res.status(404).json({ success: false, error: 'No valid files found' });
+        }
+
+        const zipName = `cloudimgs_${Date.now()}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+
+        const archive = new ZipArchive({ zlib: { level: 6 } });
+        archive.on('error', (err) => {
+            console.error('Archive error:', err);
+            if (!res.headersSent) res.status(500).end();
+        });
+
+        archive.pipe(res);
+
+        // Use a counter to avoid duplicate filenames
+        const seen = {};
+        for (const { absPath, name } of resolvedFiles) {
+            const ext = path.extname(name);
+            const base = path.basename(name, ext);
+            seen[name] = (seen[name] || 0) + 1;
+            const entryName = seen[name] > 1 ? `${base}_${seen[name]}${ext}` : name;
+            archive.file(absPath, { name: entryName });
+        }
+
+        await archive.finalize();
+    } catch (e) {
+        console.error('Batch download error:', e);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: 'Batch download failed' });
+        }
+    }
+});
+
 module.exports = router;

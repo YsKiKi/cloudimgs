@@ -16,6 +16,7 @@ import {
   CloseOutlined,
   DeleteOutlined,
   DeliveredProcedureOutlined,
+  DownloadOutlined,
   GlobalOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -33,6 +34,7 @@ const FloatingToolbar = ({
   selectedCount,
   onBatchDelete,
   onBatchMove,
+  onBatchDownload,
 }) => {
   const [uploadVisible, setUploadVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -88,6 +90,25 @@ const FloatingToolbar = ({
         {/* Batch Actions */}
         {isBatchMode && selectedCount > 0 && (
            <>
+            {/* Download Button */}
+            <Tooltip title="打包下载" placement="top">
+                <Button
+                    shape="circle"
+                    icon={<DownloadOutlined />}
+                    type="primary"
+                    size="middle"
+                    onClick={onBatchDownload}
+                    style={{
+                        ...buttonStyle,
+                        color: '#fff',
+                        background: '#52c41a',
+                        boxShadow: '0 2px 8px rgba(82,196,26,0.4)'
+                    }}
+                    className="toolbar-btn"
+                />
+            </Tooltip>
+            <div style={{ width: 1, height: 16, background: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)" }} />
+
             {/* Move Button */}
             <Tooltip title="移动到相册" placement="top">
                 <Button
