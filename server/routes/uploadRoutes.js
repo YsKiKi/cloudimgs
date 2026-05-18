@@ -15,6 +15,10 @@ const sharp = require('sharp');
 const router = express.Router();
 const STORAGE_PATH = config.storage.path;
 
+function getBaseUrl(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
 router.post('/upload-base64', requirePassword, async (req, res) => {
     try {
         let dir = req.body.dir || req.query.dir || "";
