@@ -314,8 +314,8 @@ router.put('/images/*', requirePassword, async (req, res) => {
 // ── 批量打包下载 ──────────────────────────────────────────────────────────────
 
 router.post('/batch/download', requirePassword, async (req, res) => {
-    const { ZipArchive } = require('archiver');
     try {
+        const { ZipArchive } = await import('archiver');
         const { files } = req.body;
         if (!Array.isArray(files) || files.length === 0) {
             return res.status(400).json({ success: false, error: 'No files selected' });
