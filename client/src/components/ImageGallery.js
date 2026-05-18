@@ -938,6 +938,21 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   }, []);
 
   const groups = useMemo(() => {
+    // 搜索模式下：始终按日期分组展示搜索结果，不使用文件夹分组视图
+    if (searchText) {
+      const map = new Map();
+      for (const img of images) {
+        const key = dayjs(img.uploadTime).format("YYYY年MM月DD日");
+        const arr = map.get(key) || [];
+        arr.push(img);
+        map.set(key, arr);
+      }
+      const dates = Array.from(map.keys()).sort(
+        (a, b) => dayjs(b).valueOf() - dayjs(a).valueOf()
+      );
+      return dates.map((d) => ({ type: "date-group", date: d, items: map.get(d) }));
+    }
+
     // 有子文件夹时，使用服务端按文件夹分组的数据（无需全量拉取）
     if (subdirs.length > 0 && folderGroupData) {
       const result = [];
@@ -982,7 +997,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
       (a, b) => dayjs(b).valueOf() - dayjs(a).valueOf()
     );
     return dates.map((d) => ({ type: "date-group", date: d, items: map.get(d) }));
-  }, [images, subdirs, folderGroupData, selectRectImages]);
+  }, [images, subdirs, folderGroupData, selectRectImages, searchText]);
 
   // 所有当前显示的图片的平铺列表（用于预览导航）
   const displayedImages = useMemo(() => {
@@ -1340,8 +1355,10 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
   }, [dir, api, directoryRefreshKey]);
 
   // 当有子文件夹时，按文件夹分组获取预览图片（不再全量拉取）
+  // 搜索模式下跳过文件夹预览加载，避免覆盖搜索结果
   useEffect(() => {
-    if (subdirs.length === 0 || showDirectOnly) {
+    if (subdirs.length === 0 || showDirectOnly || searchText) {
+      if (searchText) return; // 搜索时保留现有 folderGroupData（但 groups memo 会忽略它）
       setFolderGroupData(null);
       return;
     }
@@ -1370,8 +1387,7 @@ const ImageGallery = ({ onDelete, onRefresh, api, isAuthenticated, refreshTrigge
     };
     fetchFolderPreviews();
     return () => { active = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subdirs, dir, api, refreshTrigger, showDirectOnly]);
+  }, [subdirs, dir, api, refreshTrigger, showDirectOnly, searchText]);
 
   useEffect(() => {
     if (!isInitialized.current) {

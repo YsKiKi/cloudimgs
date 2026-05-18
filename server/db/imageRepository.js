@@ -51,6 +51,19 @@ const paginateDirectInDirQuery = db.prepare(
 const paginateDirectInRootQuery = db.prepare(
     "SELECT * FROM images WHERE rel_path NOT LIKE '%/%' ORDER BY upload_time DESC LIMIT ? OFFSET ?"
 );
+// 直接子图 + 搜索
+const countDirectInDirSearchQuery = db.prepare(
+    "SELECT COUNT(*) as count FROM images WHERE rel_path LIKE ? || '/%' AND rel_path NOT LIKE ? || '/%/%' AND filename LIKE '%' || ? || '%'"
+);
+const paginateDirectInDirSearchQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path LIKE ? || '/%' AND rel_path NOT LIKE ? || '/%/%' AND filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?"
+);
+const countDirectInRootSearchQuery = db.prepare(
+    "SELECT COUNT(*) as count FROM images WHERE rel_path NOT LIKE '%/%' AND filename LIKE '%' || ? || '%'"
+);
+const paginateDirectInRootSearchQuery = db.prepare(
+    "SELECT * FROM images WHERE rel_path NOT LIKE '%/%' AND filename LIKE '%' || ? || '%' ORDER BY upload_time DESC LIMIT ? OFFSET ?"
+);
 const getRandomByDirQuery = db.prepare("SELECT * FROM images WHERE rel_path LIKE ? || '/%' ORDER BY RANDOM() LIMIT 1");
 const getRandomAllQuery = db.prepare("SELECT * FROM images ORDER BY RANDOM() LIMIT 1");
 
@@ -157,11 +170,21 @@ module.exports = {
     },
 
     // 仅直接子图分页
-    paginateDirect: (dir, page, pageSize) => {
+    paginateDirect: (dir, page, pageSize, search = '') => {
         const offset = (page - 1) * pageSize;
         if (!dir) {
+            if (search) {
+                const total = countDirectInRootSearchQuery.get(search).count;
+                const data = paginateDirectInRootSearchQuery.all(search, pageSize, offset);
+                return { data, total };
+            }
             const total = countDirectImagesInRootQuery.get().count;
             const data = paginateDirectInRootQuery.all(pageSize, offset);
+            return { data, total };
+        }
+        if (search) {
+            const total = countDirectInDirSearchQuery.get(dir, dir, search).count;
+            const data = paginateDirectInDirSearchQuery.all(dir, dir, search, pageSize, offset);
             return { data, total };
         }
         const total = countDirectImagesInDirQuery.get(dir, dir).count;

@@ -81,9 +81,18 @@ const mockAdapter = async (config) => {
       if (cleanUrl === "/images" && method === "get") {
         const page = params?.page || 1;
         const pageSize = params?.pageSize || 10;
+        const search = params?.search || "";
+
+        let filtered = mockImages;
+        if (search) {
+          filtered = mockImages.filter(img =>
+            img.filename.toLowerCase().includes(search.toLowerCase())
+          );
+        }
+
         const start = (page - 1) * pageSize;
         const end = start + pageSize;
-        const pageData = mockImages.slice(start, end);
+        const pageData = filtered.slice(start, end);
 
         resolve({
           data: {
@@ -92,8 +101,8 @@ const mockAdapter = async (config) => {
             pagination: {
               current: parseInt(page),
               pageSize: parseInt(pageSize),
-              total: mockImages.length,
-              totalPages: Math.ceil(mockImages.length / pageSize),
+              total: filtered.length,
+              totalPages: Math.ceil(filtered.length / pageSize),
             },
           },
           status: 200,

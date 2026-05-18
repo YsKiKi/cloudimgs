@@ -450,7 +450,7 @@ router.get('/images', requirePassword, async (req, res) => {
             const paginated = allImages.slice(startIndex, startIndex + pageSize);
             paginateResult = { data: paginated, total };
         } else if (directOnly) {
-            paginateResult = imageRepository.paginateDirect(dir, page, pageSize);
+            paginateResult = imageRepository.paginateDirect(dir, page, pageSize, search);
         } else {
             paginateResult = imageRepository.paginate(dir, search, page, pageSize);
         }
