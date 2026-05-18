@@ -157,7 +157,7 @@ const ApiDocs = () => {
         description="检查当前系统是否开启了密码保护。"
         responseExample={`{
   "success": true,
-  "data": { "requirePassword": true, "hasPassword": true }
+  "data": { "enabled": true }
 }`}
       />
 
@@ -327,6 +327,18 @@ const ApiDocs = () => {
   ]
 }`}
       />
+
+      <ApiEndpoint
+        title="按文件夹分组预览"
+        method="GET"
+        path="/api/images/by-folder"
+        description="获取指定目录下按子文件夹分组的预览图片。"
+        params={[
+          { name: 'dir', type: 'string', required: false, description: '父目录路径' },
+          { name: 'totalLimit', type: 'integer', required: false, description: '总返回数量限制（默认 20，最大 200）' },
+          { name: 'folders', type: 'json', required: true, description: '子文件夹列表 JSON，如 [{"path":"sub1","name":"sub1"}]' },
+        ]}
+      />
     </Panel>
   );
 
@@ -392,6 +404,32 @@ const ApiDocs = () => {
     "relPath": "files/doc.pdf"
   }
 }`}
+      />
+
+      <ApiEndpoint
+        title="上传图片 (URL)"
+        method="POST"
+        path="/api/upload-url"
+        description="通过远程 URL 下载并上传图片到服务器。"
+        params={[
+          { name: 'url', type: 'string', required: true, description: '远程图片 URL' },
+          { name: 'dir', type: 'string', required: false, description: '目标目录' },
+        ]}
+        curlOptions={{ isJson: true, body: { url: "https://example.com/image.jpg", dir: "downloads" } }}
+      />
+
+      <ApiEndpoint
+        title="处理图片"
+        method="POST"
+        path="/api/process-image"
+        description="上传图片并缩放居中合成到指定尺寸（输出 PNG）。"
+        params={[
+          { name: 'image', type: 'file', required: true, description: '图片文件' },
+          { name: 'width', type: 'integer', required: true, description: '目标宽度 (px)' },
+          { name: 'height', type: 'integer', required: true, description: '目标高度 (px)' },
+          { name: 'dir', type: 'string', required: false, description: '目标目录' },
+        ]}
+        curlOptions={{ isMultipart: true, extraParams: [{ key: 'width', value: '800' }, { key: 'height', value: '600' }, { key: 'dir', value: 'processed' }] }}
       />
     </Panel>
   );
@@ -466,6 +504,17 @@ const ApiDocs = () => {
   "data": { "added": 5, "removed": 2, "updated": 1 }
 }`}
       />
+
+      <ApiEndpoint
+        title="批量打包下载"
+        method="POST"
+        path="/api/batch/download"
+        description="将多个文件打包为 ZIP 并下载。"
+        params={[
+          { name: 'files', type: 'array', required: true, description: '文件相对路径数组' },
+        ]}
+        curlOptions={{ isJson: true, body: { files: ["photo1.jpg", "photo2.jpg"] } }}
+      />
     </Panel>
   );
 
@@ -496,12 +545,27 @@ const ApiDocs = () => {
         path="/api/directories"
         description="创建新的图片目录。"
         params={[
-            { name: 'path', type: 'string', required: true, description: '目录路径' }
+            { name: 'name', type: 'string', required: true, description: '目录名称' }
         ]}
-        curlOptions={{ isJson: true, body: { path: "new-album" } }}
+        curlOptions={{ isJson: true, body: { name: "new-album" } }}
         responseExample={`{
   "success": true,
   "data": { "path": "new-album" }
+}`}
+      />
+
+      <ApiEndpoint
+        title="创建文件夹"
+        method="POST"
+        path="/api/create-folder"
+        description="创建文件夹（支持嵌套路径）。"
+        params={[
+            { name: 'path', type: 'string', required: true, description: '文件夹路径' }
+        ]}
+        curlOptions={{ isJson: true, body: { path: "photos/2025" } }}
+        responseExample={`{
+  "success": true,
+  "path": "photos/2025"
 }`}
       />
 
@@ -535,21 +599,17 @@ const ApiDocs = () => {
     <Panel header={<span style={{ fontWeight: 600, fontSize: 16 }}>语义搜索 (CLIP)</span>} key="search" extra={<SearchOutlined />}>
       <ApiEndpoint
         title="语义搜索图片"
-        method="GET"
-        path="/api/search"
+        method="POST"
+        path="/api/search/semantic"
         description="使用自然语言查询语义搜索图片（需启用 CLIP 服务）。"
         params={[
-             { name: 'q', type: 'string', required: true, description: '搜索关键词' },
-             { name: 'page', type: 'integer', required: false, description: '页码' },
-             { name: 'pageSize', type: 'integer', required: false, description: '每页数量' },
-             { name: 'matchCount', type: 'integer', required: false, description: '返回匹配数量(默认50)' },
-             { name: 'threshold', type: 'float', required: false, description: '相似度阈值' },
+             { name: 'query', type: 'string', required: true, description: '搜索关键词' },
+             { name: 'limit', type: 'integer', required: false, description: '返回匹配数量（默认 50）' },
         ]}
-        requestExample="GET /api/search?q=sunset beach"
+        curlOptions={{ isJson: true, body: { query: "sunset beach", limit: 20 } }}
         responseExample={`{
   "success": true,
-  "data": [ { "filename": "beach.jpg", "url": "...", "similarity": 0.85, ... } ],
-  "pagination": { "current": 1, "pageSize": 20, "total": 5, "totalPages": 1 }
+  "data": [ { "filename": "beach.jpg", "url": "...", "score": 0.85, ... } ]
 }`}
       />
 
@@ -604,6 +664,17 @@ const ApiDocs = () => {
       />
 
       <ApiEndpoint
+        title="作废分享链接"
+        method="POST"
+        path="/api/share/revoke"
+        description="通过 signature 作废分享链接（使其不可访问）。"
+        params={[
+            { name: 'signature', type: 'string', required: true, description: '分享签名字符串' }
+        ]}
+        curlOptions={{ isJson: true, body: { signature: "abc123..." } }}
+      />
+
+      <ApiEndpoint
         title="获取分享列表"
         method="GET"
         path="/api/share/list"
@@ -633,10 +704,10 @@ const ApiDocs = () => {
       <ApiEndpoint
         title="访问分享内容（公开）"
         method="GET"
-        path="/api/share/access/:token"
+        path="/api/share/access"
         description="通过分享 token 公开访问相册内容（无需认证）。"
         params={[
-             { name: ':token', type: 'path', required: true, description: '分享 Token' },
+             { name: 'token', type: 'string', required: true, description: '分享 Token' },
              { name: 'page', type: 'integer', required: false, description: '页码' },
              { name: 'pageSize', type: 'integer', required: false, description: '每页数量' },
         ]}
@@ -691,10 +762,10 @@ const ApiDocs = () => {
       <ApiEndpoint
         title="热门图片"
         method="GET"
-        path="/api/stats/top-images"
+        path="/api/stats/top"
         description="获取访问量最高的图片列表。"
         params={[
-             { name: 'limit', type: 'integer', required: false, description: '返回数量（默认 10）' },
+             { name: 'limit', type: 'integer', required: false, description: '返回数量（默认 10，最大 100）' },
         ]}
         responseExample={`{
   "success": true,
@@ -702,6 +773,40 @@ const ApiDocs = () => {
     { "filename": "popular.jpg", "url": "...", "rawUrl": "...", "views": 1500, ... }
   ]
 }`}
+      />
+
+      <ApiEndpoint
+        title="获取用户设置"
+        method="GET"
+        path="/api/settings"
+        description="获取所有用户持久化设置（键值对）。"
+        responseExample={`{
+  "success": true,
+  "data": { "theme": "dark", "language": "zh" }
+}`}
+      />
+
+      <ApiEndpoint
+        title="保存用户设置"
+        method="PUT"
+        path="/api/settings"
+        description="保存单个用户设置项。"
+        params={[
+             { name: 'key', type: 'string', required: true, description: '设置键名' },
+             { name: 'value', type: 'any', required: true, description: '设置值（任意 JSON 可序列化类型）' },
+        ]}
+        curlOptions={{ isJson: true, body: { key: "theme", value: "dark" } }}
+      />
+
+      <ApiEndpoint
+        title="批量保存设置"
+        method="PUT"
+        path="/api/settings/batch"
+        description="一次性保存多个用户设置项。"
+        params={[
+             { name: 'settings', type: 'object', required: true, description: '键值对对象' },
+        ]}
+        curlOptions={{ isJson: true, body: { settings: { theme: "dark", language: "zh" } } }}
       />
     </Panel>
   );
